@@ -1,0 +1,29 @@
+{
+  "host": "192.168.1.23",
+  "port": 22,
+  "username": "mobile",
+  "password": "change-me",
+  "privateKeyPath": null,
+  "passphrase": null,
+  "allowedRoots": [
+    "/var/mobile",
+    "/private/var/mobile",
+    "/var/containers/Bundle/Application",
+    "/private/var/containers/Bundle/Application",
+    "/var/jb",
+    "/tmp"
+  ],
+  "readOnly": true,
+  "allowWrites": false,
+  "maxReadSize": 1048576,
+  "searchCacheTtlMs": 120000,
+  "searchDefaultMaxResults": 25,
+  "searchDefaultMaxDepth": 5,
+  "searchMaxEntries": 1500,
+  "backupBeforeWrite": true,
+  "requireWriteApproval": true,
+  "writeApprovalTtlMs": 300000,
+  "connectTimeoutMs": 15000,
+  "readyTimeoutMs": 15000,
+  "logPath": "ios-files-mcp.log"
+}
