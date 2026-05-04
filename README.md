@@ -206,6 +206,10 @@ IOS_FILES_MCP_READ_ONLY
 IOS_FILES_MCP_ALLOW_WRITES
 IOS_FILES_MCP_REQUIRE_WRITE_APPROVAL
 IOS_FILES_MCP_MAX_READ_SIZE
+IOS_FILES_MCP_JS_BUNDLE_MAX_READ_SIZE
+IOS_FILES_MCP_SQLITE_MAX_READ_SIZE
+IOS_FILES_MCP_HERMES_DECODER_COMMAND
+IOS_FILES_MCP_HERMES_DECODER_OUTPUT_LIMIT
 IOS_FILES_MCP_SEARCH_CACHE_TTL_MS
 IOS_FILES_MCP_SEARCH_DEFAULT_MAX_RESULTS
 IOS_FILES_MCP_SEARCH_DEFAULT_MAX_DEPTH
@@ -255,7 +259,10 @@ Edit `ios-files-mcp.config.json`:
   "readOnly": true,
   "allowWrites": false,
   "maxReadSize": 4194304,
+  "jsBundleMaxReadSize": 67108864,
   "sqliteMaxReadSize": 67108864,
+  "hermesDecoderCommand": null,
+  "hermesDecoderOutputLimit": 4194304,
   "searchCacheTtlMs": 120000,
   "searchDefaultMaxResults": 25,
   "searchDefaultMaxDepth": 5,
@@ -266,7 +273,17 @@ Edit `ios-files-mcp.config.json`:
 }
 ```
 
-`maxReadSize` defaults to `4194304` bytes, which is 4 MiB. `sqliteMaxReadSize` defaults to `67108864` bytes, which is 64 MiB for read-only SQLite inspection.
+`maxReadSize` defaults to `4194304` bytes, which is 4 MiB. `sqliteMaxReadSize` and `jsBundleMaxReadSize` default to `67108864` bytes, which is 64 MiB for read-only SQLite and React Native bundle inspection.
+
+`hermesDecoderCommand` is optional. Plain `.jsbundle` files can be beautified without it. Hermes bytecode needs an external local decoder/disassembler command because Hermes bytecode is compiled binary data, not JavaScript source.
+
+Example:
+
+```json
+"hermesDecoderCommand": "hermesc -dump-bytecode {input}"
+```
+
+Use `{input}` for the temporary local Hermes bytecode file. If your decoder writes to a file, use `{output}` too.
 
 `ios-files-mcp.config.example.json` is only a template. If you use this file, point the MCP server at your real config with `IOS_FILES_MCP_CONFIG`.
 
@@ -437,6 +454,8 @@ Every operation is logged to `ios-files-mcp.log`. File contents and secrets are 
 | `ios_tail_file(path, maxBytes)` | Reads the last bytes of a file, useful for logs. |
 | `ios_read_last_lines(path, lines, maxBytes)` | Reads the last N lines of a text file. |
 | `ios_read_plist(path)` | Parses XML or binary plist files and returns JSON-safe data. |
+| `ios_inspect_js_bundle(path)` | Detects whether a React Native bundle is plain JavaScript, Hermes bytecode, or unknown binary. |
+| `ios_decode_js_bundle(path, mode, localPath, maxOutputBytes, beautify)` | Beautifies plain `.jsbundle` files or runs the configured Hermes decoder for bytecode bundles. |
 
 ### Copying Files To Your Computer
 
@@ -463,6 +482,12 @@ Every operation is logged to `ios-files-mcp.log`. File contents and secrets are 
 | --- | --- |
 | `ios_read_sqlite_schema(path)` | Reads table/view names, SQL definitions, and table columns from a SQLite database. |
 | `ios_query_sqlite(path, sql, limit)` | Runs one read-only SQL statement and returns limited rows. Allows `SELECT`, `PRAGMA`, `WITH`, and `EXPLAIN`. |
+
+### React Native Bundles
+
+Plain React Native `.jsbundle` files are JavaScript text. `ios_decode_js_bundle` can beautify them and either preview the result in the MCP response or save it to a local file.
+
+Hermes bundles are bytecode. The server can detect them, but it needs `hermesDecoderCommand` to disassemble them. The output is usually bytecode/disassembly, not the original source code.
 
 ### Writing Files
 
@@ -497,4 +522,5 @@ Write-capable tools also accept optional `approvalId`. If `requireWriteApproval=
 - Use `ios_read_file_chunk`, `ios_tail_file`, or `ios_read_last_lines` instead of repeated full-file reads.
 - Use `ios_download_file` for one large file, or `ios_zip_download` for folders/multiple files you want copied from the iPhone to your PC.
 - Use `ios_read_sqlite_schema` and `ios_query_sqlite` for read-only SQLite inspection instead of dumping whole database files into chat.
+- Use `ios_inspect_js_bundle` before `ios_decode_js_bundle` when you are not sure whether a React Native bundle is plain JavaScript or Hermes bytecode.
 - More app lookup guidance is in `SKILLS.md`.

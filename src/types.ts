@@ -10,7 +10,10 @@ export type ServerConfig = {
   readOnly: boolean;
   allowWrites: boolean;
   maxReadSize: number;
+  jsBundleMaxReadSize: number;
   sqliteMaxReadSize: number;
+  hermesDecoderCommand?: string;
+  hermesDecoderOutputLimit: number;
   searchCacheTtlMs: number;
   searchDefaultMaxResults: number;
   searchDefaultMaxDepth: number;

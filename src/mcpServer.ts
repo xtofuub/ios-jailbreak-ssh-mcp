@@ -250,6 +250,38 @@ export function createMcpServer(
   registerTool(
     server,
     logger,
+    "ios_inspect_js_bundle",
+    "Detect whether a React Native bundle is plain JavaScript, Hermes bytecode, or unknown binary.",
+    { path: z.string() },
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    (args) => service.inspectJsBundle(args.path)
+  );
+
+  registerTool(
+    server,
+    logger,
+    "ios_decode_js_bundle",
+    "Decode a React Native JS bundle. Plain jsbundle files are beautified; Hermes bytecode uses the configured local decoder command.",
+    {
+      path: z.string(),
+      mode: z.enum(["preview", "save"]).optional(),
+      localPath: z.string().optional(),
+      maxOutputBytes: z.number().int().positive().optional(),
+      beautify: z.boolean().optional()
+    },
+    { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    (args) =>
+      service.decodeJsBundle(args.path, {
+        mode: args.mode,
+        localPath: args.localPath,
+        maxOutputBytes: args.maxOutputBytes,
+        beautify: args.beautify
+      })
+  );
+
+  registerTool(
+    server,
+    logger,
     "ios_find_app",
     "Quickly locate an App Store app by name or bundle id without recursively crawling app bundles.",
     { query: z.string() },

@@ -29,6 +29,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "archiver": "^7.0.1",
     "bplist-parser": "^0.3.2",
+    "js-beautify": "^1.15.4",
     "plist": "^5.0.0",
     "sql.js": "^1.14.1",
     "ssh2": "^1.17.0",
@@ -37,6 +38,7 @@
   },
   "devDependencies": {
     "@types/archiver": "^7.0.0",
+    "@types/js-beautify": "^1.14.3",
     "@types/node": "^24.10.1",
     "@types/ssh2-sftp-client": "^9.0.6",
     "typescript": "^5.9.3"

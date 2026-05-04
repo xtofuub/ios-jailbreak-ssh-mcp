@@ -1,7 +1,10 @@
 import { createWriteStream, existsSync } from "node:fs";
-import { mkdir, readFile } from "node:fs/promises";
-import { dirname as localDirname, relative, resolve as resolveLocal } from "node:path";
+import { mkdir, mkdtemp, readFile, rm, writeFile as writeLocalFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname as localDirname, join as joinLocal, relative, resolve as resolveLocal } from "node:path";
+import { spawn } from "node:child_process";
 import archiver from "archiver";
+import beautify from "js-beautify";
 import { parse as parseXmlPlist, parseBinary as parseBinaryPlist, type PlistValue } from "plist";
 import Client from "ssh2-sftp-client";
 import {
@@ -190,6 +193,25 @@ type ZipDownloadResult = {
   localPath: string;
   entriesAdded: number;
   bytesWritten: number;
+};
+
+type JsBundleFormat = "hermes-bytecode" | "plain-js" | "unknown-binary";
+
+type JsBundleInspectResult = {
+  path: string;
+  size: number;
+  format: JsBundleFormat;
+  magic: string;
+  notes: string[];
+};
+
+type JsBundleDecodeResult = JsBundleInspectResult & {
+  mode: "preview" | "save";
+  decodedKind: "beautified-js" | "hermes-disassembly" | "raw-text";
+  content?: string;
+  localPath?: string;
+  bytesWritten?: number;
+  stderr?: string;
 };
 
 type RootDiagnostic = {
@@ -604,6 +626,92 @@ export class SftpFileService {
       format: parsed.format,
       value: this.toJsonSafe(parsed.value)
     };
+  }
+
+  async inspectJsBundle(path: string): Promise<JsBundleInspectResult> {
+    const lexicalPath = assertSafePath(path, this.config);
+    const client = await this.connectedClient();
+    const safePath = await this.resolveExistingSafePath(client, lexicalPath);
+    const stat = await client.stat(safePath);
+    const size = Number(stat.size ?? 0);
+
+    if (this.mapStatsType(stat) !== "file") {
+      throw new Error(`Path is not a regular file: ${safePath}`);
+    }
+
+    const header = size === 0 ? Buffer.alloc(0) : await this.readRemoteRange(client, safePath, 0, Math.min(size, 32) - 1);
+    const format = this.detectJsBundleFormat(header);
+    const notes = this.jsBundleNotes(format);
+
+    return {
+      path: safePath,
+      size,
+      format,
+      magic: header.subarray(0, 16).toString("hex"),
+      notes
+    };
+  }
+
+  async decodeJsBundle(
+    path: string,
+    options: {
+      mode?: "preview" | "save";
+      localPath?: string;
+      maxOutputBytes?: number;
+      beautify?: boolean;
+    } = {}
+  ): Promise<JsBundleDecodeResult> {
+    const inspect = await this.inspectJsBundle(path);
+    const mode = options.mode ?? (options.localPath ? "save" : "preview");
+    const outputLimit = Math.min(
+      options.maxOutputBytes ?? this.config.hermesDecoderOutputLimit,
+      this.config.hermesDecoderOutputLimit
+    );
+    const client = await this.connectedClient();
+
+    if (inspect.size > this.config.jsBundleMaxReadSize) {
+      throw new Error(
+        `Bundle is ${inspect.size} bytes, which exceeds jsBundleMaxReadSize=${this.config.jsBundleMaxReadSize}. Use ios_download_file first or raise the limit.`
+      );
+    }
+
+    const buffer = await this.readRemoteBufferLimited(client, inspect.path, this.config.jsBundleMaxReadSize);
+
+    if (inspect.format === "plain-js") {
+      const rawText = buffer.toString("utf8");
+      const content = options.beautify ?? true ? beautify.js(rawText, { indent_size: 2 }) : rawText;
+      return this.bundleDecodeOutput({
+        inspect,
+        mode,
+        decodedKind: options.beautify === false ? "raw-text" : "beautified-js",
+        content,
+        localPath: options.localPath,
+        outputLimit
+      });
+    }
+
+    if (inspect.format !== "hermes-bytecode") {
+      throw new Error(
+        "Bundle does not look like plain JavaScript or Hermes bytecode. Download it and inspect it with a local binary tool."
+      );
+    }
+
+    if (!this.config.hermesDecoderCommand) {
+      throw new Error(
+        "Hermes bytecode detected, but no decoder command is configured. Set hermesDecoderCommand or IOS_FILES_MCP_HERMES_DECODER_COMMAND, for example: hermesc -dump-bytecode {input}"
+      );
+    }
+
+    const decoded = await this.runHermesDecoder(buffer, this.config.hermesDecoderCommand, outputLimit);
+    return this.bundleDecodeOutput({
+      inspect,
+      mode,
+      decodedKind: "hermes-disassembly",
+      content: decoded.stdout,
+      localPath: options.localPath,
+      outputLimit,
+      stderr: decoded.stderr
+    });
   }
 
   async findApp(query: string): Promise<FindAppResult> {
@@ -1284,6 +1392,160 @@ export class SftpFileService {
     } catch {
       return false;
     }
+  }
+
+  private detectJsBundleFormat(header: Buffer): JsBundleFormat {
+    const asText = header.toString("utf8");
+
+    if (asText.startsWith("c61 c03 bc")) {
+      return "hermes-bytecode";
+    }
+
+    if (header.length >= 4 && header[0] === 0xc6 && header[1] === 0x1f && header[2] === 0xbc && header[3] === 0x03) {
+      return "hermes-bytecode";
+    }
+
+    const firstNonWhitespace = asText.trimStart()[0];
+    if (firstNonWhitespace && ["!", "(", "/", "{", "[", "\"", "'", "v", "c", "f", "i"].includes(firstNonWhitespace)) {
+      return "plain-js";
+    }
+
+    return "unknown-binary";
+  }
+
+  private jsBundleNotes(format: JsBundleFormat): string[] {
+    if (format === "plain-js") {
+      return ["Plain JavaScript bundle detected. ios_decode_js_bundle can beautify it or save it locally."];
+    }
+
+    if (format === "hermes-bytecode") {
+      return [
+        "Hermes bytecode detected. This is compiled React Native JavaScript, not source text.",
+        "ios_decode_js_bundle can run a configured local decoder/disassembler command such as hermesc -dump-bytecode {input}."
+      ];
+    }
+
+    return ["Unknown binary format. Use ios_download_file to inspect it with a local tool."];
+  }
+
+  private async bundleDecodeOutput(options: {
+    inspect: JsBundleInspectResult;
+    mode: "preview" | "save";
+    decodedKind: JsBundleDecodeResult["decodedKind"];
+    content: string;
+    localPath?: string;
+    outputLimit: number;
+    stderr?: string;
+  }): Promise<JsBundleDecodeResult> {
+    if (options.mode === "save" || options.localPath) {
+      if (!options.localPath) {
+        throw new Error("localPath is required when mode=save.");
+      }
+
+      const safeLocalPath = this.assertSafeLocalPath(options.localPath);
+      await mkdir(localDirname(safeLocalPath), { recursive: true });
+      await writeLocalFile(safeLocalPath, options.content, "utf8");
+
+      return {
+        ...options.inspect,
+        mode: "save",
+        decodedKind: options.decodedKind,
+        localPath: safeLocalPath,
+        bytesWritten: Buffer.byteLength(options.content, "utf8"),
+        stderr: options.stderr
+      };
+    }
+
+    const contentBuffer = Buffer.from(options.content, "utf8");
+    const clipped =
+      contentBuffer.byteLength > options.outputLimit
+        ? contentBuffer.subarray(0, options.outputLimit).toString("utf8")
+        : options.content;
+
+    return {
+      ...options.inspect,
+      mode: "preview",
+      decodedKind: options.decodedKind,
+      content: clipped,
+      stderr: options.stderr,
+      notes:
+        contentBuffer.byteLength > options.outputLimit
+          ? [...options.inspect.notes, `Output was clipped to ${options.outputLimit} bytes. Use mode=save with localPath for the full decoded output.`]
+          : options.inspect.notes
+    };
+  }
+
+  private async runHermesDecoder(
+    input: Buffer,
+    commandTemplate: string,
+    outputLimit: number
+  ): Promise<{ stdout: string; stderr: string }> {
+    const tempDir = await mkdtemp(joinLocal(tmpdir(), "ios-files-mcp-hermes-"));
+    const inputPath = joinLocal(tempDir, "bundle.hbc");
+    const outputPath = joinLocal(tempDir, "bundle.decoded.txt");
+
+    try {
+      await writeLocalFile(inputPath, input);
+      const command = commandTemplate
+        .replaceAll("{input}", this.shellQuote(inputPath))
+        .replaceAll("{output}", this.shellQuote(outputPath));
+      const result = await this.runCommand(command, outputLimit);
+
+      if (commandTemplate.includes("{output}") && existsSync(outputPath)) {
+        const output = await readFile(outputPath);
+        return {
+          stdout: output.subarray(0, outputLimit).toString("utf8"),
+          stderr: result.stderr
+        };
+      }
+
+      return result;
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }
+
+  private runCommand(command: string, outputLimit: number): Promise<{ stdout: string; stderr: string }> {
+    return new Promise((resolve, reject) => {
+      const child = spawn(command, {
+        shell: true,
+        windowsHide: true
+      });
+      const stdout: Buffer[] = [];
+      const stderr: Buffer[] = [];
+      let stdoutBytes = 0;
+      let stderrBytes = 0;
+
+      child.stdout.on("data", (chunk: Buffer) => {
+        if (stdoutBytes < outputLimit) {
+          stdout.push(chunk.subarray(0, Math.max(0, outputLimit - stdoutBytes)));
+        }
+        stdoutBytes += chunk.byteLength;
+      });
+
+      child.stderr.on("data", (chunk: Buffer) => {
+        if (stderrBytes < outputLimit) {
+          stderr.push(chunk.subarray(0, Math.max(0, outputLimit - stderrBytes)));
+        }
+        stderrBytes += chunk.byteLength;
+      });
+
+      child.once("error", reject);
+      child.once("close", (code) => {
+        const stdoutText = Buffer.concat(stdout).toString("utf8");
+        const stderrText = Buffer.concat(stderr).toString("utf8");
+        if (code !== 0) {
+          reject(new Error(`Hermes decoder command failed with exit code ${code}: ${stderrText || stdoutText}`));
+          return;
+        }
+
+        resolve({ stdout: stdoutText, stderr: stderrText });
+      });
+    });
+  }
+
+  private shellQuote(value: string): string {
+    return `"${value.replace(/"/g, "\\\"")}"`;
   }
 
   private async readRemoteRange(
