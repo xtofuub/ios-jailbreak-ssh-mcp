@@ -191,16 +191,6 @@ Many other MCP clients use `mcpServers`.
 }
 ```
 
-Use an SSH key instead of a password if you prefer:
-
-```json
-"env": {
-  "IOS_FILES_MCP_HOST": "192.168.1.23",
-  "IOS_FILES_MCP_USERNAME": "mobile",
-  "IOS_FILES_MCP_KEY_PATH": "/path/to/private_key"
-}
-```
-
 Supported env vars:
 
 ```text
