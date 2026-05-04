@@ -1,4 +1,7 @@
-import { readFile } from "node:fs/promises";
+import { createWriteStream, existsSync } from "node:fs";
+import { mkdir, readFile } from "node:fs/promises";
+import { dirname as localDirname, relative, resolve as resolveLocal } from "node:path";
+import archiver from "archiver";
 import { parse as parseXmlPlist, parseBinary as parseBinaryPlist, type PlistValue } from "plist";
 import Client from "ssh2-sftp-client";
 import {
@@ -102,6 +105,93 @@ type FindAppResult = {
   notes: string[];
 };
 
+type ListAppsResult = {
+  apps: AppBundleMatch[];
+  appCount: number;
+  searchedRoots: string[];
+  truncated: boolean;
+  notes: string[];
+};
+
+type ResolveAppContainerResult = FindAppResult & {
+  bundleId: string;
+  primaryBundle?: AppBundleMatch;
+  primaryDataContainer?: AppContainerMatch;
+  primaryAppGroup?: AppContainerMatch;
+};
+
+type ExistsResult = {
+  path: string;
+  exists: boolean;
+  type?: FileEntry["type"];
+  size?: number;
+};
+
+type FileChunkResult = {
+  path: string;
+  offset: number;
+  length: number;
+  bytesRead: number;
+  encoding: "utf8" | "base64";
+  content: string;
+  fileSize: number;
+};
+
+type LastLinesResult = {
+  path: string;
+  lines: number;
+  maxBytes: number;
+  bytesRead: number;
+  content: string;
+  truncated: boolean;
+  fileSize: number;
+};
+
+type PreferenceFile = {
+  path: string;
+  name: string;
+  size: number;
+  modifyTime: string | null;
+};
+
+type ListPreferencesResult = {
+  bundleId: string;
+  preferenceDirectories: string[];
+  preferenceFiles: PreferenceFile[];
+  notes: string[];
+};
+
+type ReadPreferencesResult = ListPreferencesResult & {
+  values: Array<PlistReadResult & { name: string }>;
+};
+
+type SqliteSchemaResult = {
+  path: string;
+  size: number;
+  tables: Array<{
+    name: string;
+    type: string;
+    sql?: string;
+    columns?: Array<{ cid: number; name: string; type: string; notnull: number; defaultValue: unknown; pk: number }>;
+  }>;
+};
+
+type SqliteQueryResult = {
+  path: string;
+  columns: string[];
+  rows: Array<Record<string, unknown>>;
+  rowCount: number;
+  returnedRows: number;
+  limit: number;
+};
+
+type ZipDownloadResult = {
+  paths: string[];
+  localPath: string;
+  entriesAdded: number;
+  bytesWritten: number;
+};
+
 type RootDiagnostic = {
   path: string;
   allowed: boolean;
@@ -124,6 +214,7 @@ const SEARCH_ABSOLUTE_MAX_RESULTS = 500;
 const SEARCH_ABSOLUTE_MAX_DEPTH = 25;
 const APP_CONTAINER_SCAN_LIMIT = 1_000;
 const APP_METADATA_READ_LIMIT = 512 * 1024;
+const ZIP_ENTRY_LIMIT = 5_000;
 const APP_BUNDLE_ROOTS = [
   "/private/var/containers/Bundle/Application",
   "/var/containers/Bundle/Application"
@@ -210,6 +301,36 @@ export class SftpFileService {
 
     const content = await client.get(safePath);
     return this.bufferFromGetResult(content).toString("utf8");
+  }
+
+  async downloadFile(
+    remotePath: string,
+    localPath: string,
+    overwrite = false
+  ): Promise<{ remotePath: string; localPath: string; bytesCopied: number }> {
+    const lexicalRemotePath = assertSafePath(remotePath, this.config);
+    const safeLocalPath = this.assertSafeLocalPath(localPath);
+    const client = await this.connectedClient();
+    const safeRemotePath = await this.resolveExistingSafePath(client, lexicalRemotePath);
+    const stat = await client.stat(safeRemotePath);
+    const size = Number(stat.size ?? 0);
+
+    if (this.mapStatsType(stat) !== "file") {
+      throw new Error(`Remote path is not a regular file: ${safeRemotePath}`);
+    }
+
+    if (existsSync(safeLocalPath) && !overwrite) {
+      throw new Error(`Local path already exists. Set overwrite=true to replace: ${safeLocalPath}`);
+    }
+
+    await mkdir(localDirname(safeLocalPath), { recursive: true });
+    await client.get(safeRemotePath, createWriteStream(safeLocalPath));
+
+    return {
+      remotePath: safeRemotePath,
+      localPath: safeLocalPath,
+      bytesCopied: size
+    };
   }
 
   async writeFile(path: string, content: string): Promise<{ path: string; bytesWritten: number; backupPath?: string }> {
@@ -569,6 +690,356 @@ export class SftpFileService {
     };
   }
 
+  async listApps(query?: string, limit = 200): Promise<ListAppsResult> {
+    const client = await this.connectedClient();
+    const queryLower = query?.trim().toLowerCase();
+    const apps: AppBundleMatch[] = [];
+    const searchedRoots: string[] = [];
+    const notes: string[] = [];
+    const seenPaths = new Set<string>();
+    let truncated = false;
+
+    for (const root of APP_BUNDLE_ROOTS) {
+      const safeRoot = await this.safeAppRoot(client, root, notes);
+      if (!safeRoot || seenPaths.has(safeRoot)) {
+        continue;
+      }
+
+      seenPaths.add(safeRoot);
+      searchedRoots.push(safeRoot);
+      const scan = await this.scanBundleRoot(client, safeRoot, queryLower);
+      apps.push(...scan.matches);
+      truncated ||= scan.truncated;
+
+      if (apps.length >= limit) {
+        truncated = true;
+        break;
+      }
+    }
+
+    return {
+      apps: this.uniqueByPath(apps).slice(0, limit),
+      appCount: Math.min(this.uniqueByPath(apps).length, limit),
+      searchedRoots,
+      truncated,
+      notes
+    };
+  }
+
+  async resolveAppContainer(bundleId: string): Promise<ResolveAppContainerResult> {
+    const normalizedBundleId = bundleId.trim();
+    if (!normalizedBundleId) {
+      throw new Error("bundleId must be non-empty.");
+    }
+
+    const result = await this.findApp(normalizedBundleId);
+    const bundleIdLower = normalizedBundleId.toLowerCase();
+    const primaryBundle =
+      result.bundleMatches.find((match) => match.bundleId?.toLowerCase() === bundleIdLower) ??
+      result.bundleMatches[0];
+    const primaryDataContainer = result.dataContainerMatches[0];
+    const primaryAppGroup = result.appGroupMatches[0];
+
+    return {
+      ...result,
+      bundleId: normalizedBundleId,
+      primaryBundle,
+      primaryDataContainer,
+      primaryAppGroup
+    };
+  }
+
+  async existsPath(path: string): Promise<ExistsResult> {
+    const lexicalPath = assertSafePath(path, this.config);
+    const client = await this.connectedClient();
+
+    try {
+      const safePath = await this.resolveExistingSafePath(client, lexicalPath);
+      const stat = await client.stat(safePath);
+      return {
+        path: safePath,
+        exists: true,
+        type: this.mapStatsType(stat),
+        size: Number(stat.size ?? 0)
+      };
+    } catch {
+      return {
+        path: lexicalPath,
+        exists: false
+      };
+    }
+  }
+
+  async readFileChunk(
+    path: string,
+    offset = 0,
+    length = this.config.maxReadSize,
+    encoding: "utf8" | "base64" = "utf8"
+  ): Promise<FileChunkResult> {
+    if (!Number.isInteger(offset) || offset < 0) {
+      throw new Error("offset must be a non-negative integer.");
+    }
+
+    if (!Number.isInteger(length) || length <= 0) {
+      throw new Error("length must be a positive integer.");
+    }
+
+    const cappedLength = Math.min(length, this.config.maxReadSize);
+    const lexicalPath = assertSafePath(path, this.config);
+    const client = await this.connectedClient();
+    const safePath = await this.resolveExistingSafePath(client, lexicalPath);
+    const stat = await client.stat(safePath);
+    const fileSize = Number(stat.size ?? 0);
+
+    if (this.mapStatsType(stat) !== "file") {
+      throw new Error(`Path is not a regular file: ${safePath}`);
+    }
+
+    if (offset >= fileSize) {
+      return { path: safePath, offset, length: cappedLength, bytesRead: 0, encoding, content: "", fileSize };
+    }
+
+    const end = Math.min(offset + cappedLength, fileSize) - 1;
+    const buffer = await this.readRemoteRange(client, safePath, offset, end);
+
+    return {
+      path: safePath,
+      offset,
+      length: cappedLength,
+      bytesRead: buffer.byteLength,
+      encoding,
+      content: encoding === "base64" ? buffer.toString("base64") : buffer.toString("utf8"),
+      fileSize
+    };
+  }
+
+  async tailFile(path: string, maxBytes = 64 * 1024): Promise<FileChunkResult> {
+    const lexicalPath = assertSafePath(path, this.config);
+    const client = await this.connectedClient();
+    const safePath = await this.resolveExistingSafePath(client, lexicalPath);
+    const stat = await client.stat(safePath);
+    const fileSize = Number(stat.size ?? 0);
+    const cappedMaxBytes = Math.min(Math.max(maxBytes, 1), this.config.maxReadSize);
+    const offset = Math.max(0, fileSize - cappedMaxBytes);
+
+    return this.readFileChunk(safePath, offset, cappedMaxBytes, "utf8");
+  }
+
+  async readLastLines(path: string, lines = 100, maxBytes = 256 * 1024): Promise<LastLinesResult> {
+    if (!Number.isInteger(lines) || lines <= 0) {
+      throw new Error("lines must be a positive integer.");
+    }
+
+    const lexicalPath = assertSafePath(path, this.config);
+    const client = await this.connectedClient();
+    const safePath = await this.resolveExistingSafePath(client, lexicalPath);
+    const stat = await client.stat(safePath);
+    const fileSize = Number(stat.size ?? 0);
+    const cappedMaxBytes = Math.min(Math.max(maxBytes, 1), this.config.maxReadSize);
+    const offset = Math.max(0, fileSize - cappedMaxBytes);
+    const buffer = fileSize === 0 ? Buffer.alloc(0) : await this.readRemoteRange(client, safePath, offset, fileSize - 1);
+    const text = buffer.toString("utf8");
+    const selectedLines = text.split(/\r?\n/).slice(-lines);
+
+    return {
+      path: safePath,
+      lines,
+      maxBytes: cappedMaxBytes,
+      bytesRead: buffer.byteLength,
+      content: selectedLines.join("\n"),
+      truncated: offset > 0,
+      fileSize
+    };
+  }
+
+  async listPreferences(bundleId: string): Promise<ListPreferencesResult> {
+    const resolved = await this.resolveAppContainer(bundleId);
+    const client = await this.connectedClient();
+    const preferenceDirectories: string[] = [];
+    const preferenceFiles: PreferenceFile[] = [];
+    const notes = [...resolved.notes];
+
+    for (const container of resolved.dataContainerMatches) {
+      const preferenceDirectory = this.assertCanonicalSafePath(joinRemote(container.path, "Library/Preferences"));
+      if (!(await this.exists(client, preferenceDirectory))) {
+        continue;
+      }
+
+      preferenceDirectories.push(preferenceDirectory);
+
+      for (const entry of await client.list(preferenceDirectory)) {
+        if (this.mapEntryType(entry.type) !== "file" || !entry.name.endsWith(".plist")) {
+          continue;
+        }
+
+        preferenceFiles.push({
+          path: this.assertCanonicalSafePath(joinRemote(preferenceDirectory, entry.name)),
+          name: entry.name,
+          size: Number(entry.size ?? 0),
+          modifyTime: this.dateFromMillis(entry.modifyTime)
+        });
+      }
+    }
+
+    if (preferenceFiles.length === 0) {
+      notes.push("No readable preference plist files were found in the matched data containers.");
+    }
+
+    return {
+      bundleId,
+      preferenceDirectories: this.uniqueStrings(preferenceDirectories),
+      preferenceFiles: this.uniqueByPath(preferenceFiles),
+      notes
+    };
+  }
+
+  async readPreferences(
+    bundleId: string,
+    includeAll = false,
+    maxFiles = 10
+  ): Promise<ReadPreferencesResult> {
+    const listed = await this.listPreferences(bundleId);
+    const client = await this.connectedClient();
+    const bundleIdLower = bundleId.toLowerCase();
+    const selectedFiles = listed.preferenceFiles
+      .filter((file) => includeAll || file.name.toLowerCase() === `${bundleIdLower}.plist`)
+      .slice(0, maxFiles);
+    const values: Array<PlistReadResult & { name: string }> = [];
+    const notes = [...listed.notes];
+
+    for (const file of selectedFiles) {
+      const parsed = await this.readPlistAt(client, file.path, this.config.maxReadSize);
+      values.push({
+        path: file.path,
+        name: file.name,
+        format: parsed.format,
+        value: this.toJsonSafe(parsed.value)
+      });
+    }
+
+    if (!includeAll && values.length === 0 && listed.preferenceFiles.length > 0) {
+      notes.push("No exact bundle-id preference plist was found. Retry with includeAll=true to read nearby preference files.");
+    }
+
+    return {
+      ...listed,
+      notes,
+      values
+    };
+  }
+
+  async readSqliteSchema(path: string): Promise<SqliteSchemaResult> {
+    const { db, safePath, size } = await this.openRemoteSqlite(path);
+
+    try {
+      const schemaRows = this.execSqliteRows(
+        db,
+        "SELECT type, name, sql FROM sqlite_master WHERE type IN ('table', 'view') ORDER BY type, name",
+        500
+      );
+      const tables: SqliteSchemaResult["tables"] = [];
+
+      for (const row of schemaRows.rows) {
+        const name = String(row.name ?? "");
+        const type = String(row.type ?? "");
+        const columns =
+          type === "table"
+            ? this.execSqliteRows(db, `PRAGMA table_info(${this.sqliteIdentifier(name)})`, 500).rows.map((column) => ({
+                cid: Number(column.cid ?? 0),
+                name: String(column.name ?? ""),
+                type: String(column.type ?? ""),
+                notnull: Number(column.notnull ?? 0),
+                defaultValue: column.dflt_value,
+                pk: Number(column.pk ?? 0)
+              }))
+            : undefined;
+
+        tables.push({
+          name,
+          type,
+          sql: typeof row.sql === "string" ? row.sql : undefined,
+          columns
+        });
+      }
+
+      return { path: safePath, size, tables };
+    } finally {
+      db.close();
+    }
+  }
+
+  async querySqlite(path: string, sql: string, limit = 50): Promise<SqliteQueryResult> {
+    if (!Number.isInteger(limit) || limit <= 0 || limit > 500) {
+      throw new Error("limit must be an integer between 1 and 500.");
+    }
+
+    this.assertReadOnlySql(sql);
+    const { db, safePath } = await this.openRemoteSqlite(path);
+
+    try {
+      const result = this.execSqliteRows(db, sql, limit);
+      return {
+        path: safePath,
+        columns: result.columns,
+        rows: result.rows,
+        rowCount: result.rowCount,
+        returnedRows: result.rows.length,
+        limit
+      };
+    } finally {
+      db.close();
+    }
+  }
+
+  async zipDownload(
+    paths: string[],
+    localPath: string,
+    overwrite = false
+  ): Promise<ZipDownloadResult> {
+    if (!Array.isArray(paths) || paths.length === 0) {
+      throw new Error("paths must contain at least one remote path.");
+    }
+
+    const safeLocalPath = this.assertSafeLocalPath(localPath);
+    if (existsSync(safeLocalPath) && !overwrite) {
+      throw new Error(`Local path already exists. Set overwrite=true to replace: ${safeLocalPath}`);
+    }
+
+    const client = await this.connectedClient();
+    const safePaths: string[] = [];
+    for (const path of paths) {
+      safePaths.push(await this.resolveExistingSafePath(client, assertSafePath(path, this.config)));
+    }
+
+    await mkdir(localDirname(safeLocalPath), { recursive: true });
+    const output = createWriteStream(safeLocalPath);
+    const archive = archiver("zip", { zlib: { level: 6 } });
+    let entriesAdded = 0;
+
+    const archiveDone = new Promise<void>((resolve, reject) => {
+      output.once("close", resolve);
+      output.once("error", reject);
+      archive.once("error", reject);
+    });
+
+    archive.pipe(output);
+
+    for (const safePath of safePaths) {
+      const rootName = this.safeZipEntryName(basename(safePath) || "root");
+      entriesAdded += await this.addRemotePathToArchive(client, archive, safePath, rootName);
+    }
+
+    await archive.finalize();
+    await archiveDone;
+
+    return {
+      paths: safePaths,
+      localPath: safeLocalPath,
+      entriesAdded,
+      bytesWritten: archive.pointer()
+    };
+  }
+
   async diagnoseRoots(): Promise<DiagnoseRootsResult> {
     const client = await this.connectedClient();
     const roots: RootDiagnostic[] = [];
@@ -815,6 +1286,189 @@ export class SftpFileService {
     }
   }
 
+  private async readRemoteRange(
+    client: Client,
+    path: string,
+    start: number,
+    end: number
+  ): Promise<Buffer> {
+    if (end < start) {
+      return Buffer.alloc(0);
+    }
+
+    const stream = client.createReadStream(path, { start, end });
+    const chunks: Buffer[] = [];
+
+    await new Promise<void>((resolve, reject) => {
+      stream.on("data", (chunk: Buffer | string) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+      stream.once("error", reject);
+      stream.once("end", resolve);
+    });
+
+    return Buffer.concat(chunks);
+  }
+
+  private async openRemoteSqlite(path: string): Promise<{
+    db: {
+      exec(sql: string): Array<{ columns: string[]; values: unknown[][] }>;
+      close(): void;
+    };
+    safePath: string;
+    size: number;
+  }> {
+    const lexicalPath = assertSafePath(path, this.config);
+    const client = await this.connectedClient();
+    const safePath = await this.resolveExistingSafePath(client, lexicalPath);
+    const stat = await client.stat(safePath);
+    const size = Number(stat.size ?? 0);
+
+    if (this.mapStatsType(stat) !== "file") {
+      throw new Error(`Path is not a regular file: ${safePath}`);
+    }
+
+    if (size > this.config.sqliteMaxReadSize) {
+      throw new Error(
+        `SQLite file is ${size} bytes, which exceeds sqliteMaxReadSize=${this.config.sqliteMaxReadSize}. Download it first if you need offline analysis.`
+      );
+    }
+
+    const buffer = await this.readRemoteBufferLimited(client, safePath, this.config.sqliteMaxReadSize);
+    const initSqlJs = (await import("sql.js")).default;
+    const SQL = await initSqlJs();
+    return {
+      db: new SQL.Database(buffer),
+      safePath,
+      size
+    };
+  }
+
+  private execSqliteRows(
+    db: { exec(sql: string): Array<{ columns: string[]; values: unknown[][] }> },
+    sql: string,
+    limit: number
+  ): { columns: string[]; rows: Array<Record<string, unknown>>; rowCount: number } {
+    const results = db.exec(sql);
+    const first = results[0];
+
+    if (!first) {
+      return { columns: [], rows: [], rowCount: 0 };
+    }
+
+    const rows = first.values.map((row) =>
+      Object.fromEntries(first.columns.map((column, index) => [column, this.toJsonSafe(row[index])]))
+    );
+
+    return {
+      columns: first.columns,
+      rows: rows.slice(0, limit),
+      rowCount: rows.length
+    };
+  }
+
+  private assertReadOnlySql(sql: string): void {
+    const trimmed = sql.trim();
+    if (!trimmed) {
+      throw new Error("sql must be non-empty.");
+    }
+
+    const withoutTrailingSemicolon = trimmed.replace(/;\s*$/, "");
+    if (withoutTrailingSemicolon.includes(";")) {
+      throw new Error("Only one read-only SQL statement is allowed.");
+    }
+
+    if (!/^(select|pragma|with|explain)\b/i.test(withoutTrailingSemicolon)) {
+      throw new Error("Only read-only SQL is allowed. Use SELECT, PRAGMA, WITH, or EXPLAIN.");
+    }
+
+    if (/\b(insert|update|delete|replace|drop|alter|create|attach|detach|vacuum|reindex)\b/i.test(withoutTrailingSemicolon)) {
+      throw new Error("SQL contains a blocked write or schema-changing keyword.");
+    }
+  }
+
+  private sqliteIdentifier(name: string): string {
+    return `"${name.replace(/"/g, "\"\"")}"`;
+  }
+
+  private async addRemotePathToArchive(
+    client: Client,
+    archive: archiver.Archiver,
+    path: string,
+    zipName: string
+  ): Promise<number> {
+    const stat = await client.stat(path);
+    const type = this.mapStatsType(stat);
+
+    if (type === "file") {
+      archive.append(client.createReadStream(path), { name: zipName });
+      return 1;
+    }
+
+    if (type !== "directory") {
+      return 0;
+    }
+
+    archive.append("", { name: `${zipName.replace(/\/+$/, "")}/` });
+    let entriesAdded = 1;
+    const pending: Array<{ remotePath: string; zipPrefix: string }> = [{ remotePath: path, zipPrefix: zipName }];
+
+    while (pending.length > 0) {
+      const current = pending.shift()!;
+      const entries = await client.list(current.remotePath);
+
+      for (const entry of entries) {
+        if (entriesAdded >= ZIP_ENTRY_LIMIT) {
+          throw new Error(`ZIP export exceeded entry limit ${ZIP_ENTRY_LIMIT}. Export a smaller path set.`);
+        }
+
+        const childPath = this.assertCanonicalSafePath(joinRemote(current.remotePath, entry.name));
+        const childZipName = `${current.zipPrefix.replace(/\/+$/, "")}/${this.safeZipEntryName(entry.name)}`;
+        const entryType = this.mapEntryType(entry.type);
+
+        if (entryType === "file") {
+          archive.append(client.createReadStream(childPath), { name: childZipName });
+          entriesAdded += 1;
+        } else if (entryType === "directory") {
+          archive.append("", { name: `${childZipName}/` });
+          entriesAdded += 1;
+          pending.push({ remotePath: childPath, zipPrefix: childZipName });
+        }
+      }
+    }
+
+    return entriesAdded;
+  }
+
+  private safeZipEntryName(name: string): string {
+    return name.replace(/\\/g, "/").split("/").filter(Boolean).join("_") || "entry";
+  }
+
+  private uniqueStrings(values: string[]): string[] {
+    return [...new Set(values)];
+  }
+
+  private assertSafeLocalPath(input: string): string {
+    if (typeof input !== "string" || input.trim() === "") {
+      throw new Error("Local path must be a non-empty string.");
+    }
+
+    const resolved = resolveLocal(input);
+    const allowed = this.config.localArtifactRoots.some((root) => {
+      const resolvedRoot = resolveLocal(root);
+      const rel = relative(resolvedRoot, resolved);
+      return rel === "" || (!rel.startsWith("..") && !rel.includes(":"));
+    });
+
+    if (!allowed) {
+      throw new Error(
+        `Local path is outside allowed local artifact roots: ${resolved}. Allowed roots: ${this.config.localArtifactRoots.join(", ")}`
+      );
+    }
+
+    return resolved;
+  }
+
   private async safeAppRoot(
     client: Client,
     root: string,
@@ -834,7 +1488,7 @@ export class SftpFileService {
   private async scanBundleRoot(
     client: Client,
     root: string,
-    queryLower: string
+    queryLower?: string
   ): Promise<{ matches: AppBundleMatch[]; truncated: boolean }> {
     const matches: AppBundleMatch[] = [];
     const uuidEntries = await client.list(root);
@@ -878,6 +1532,7 @@ export class SftpFileService {
         const build = this.stringValue(plistObject?.CFBundleVersion);
 
         if (
+          !queryLower ||
           this.valuesMatchQuery(queryLower, [
             appEntry.name,
             appName,

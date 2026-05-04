@@ -42,6 +42,76 @@ export function createMcpServer(
     (args) => service.readFile(args.path)
   );
 
+  registerTool(
+    server,
+    logger,
+    "ios_read_file_chunk",
+    "Read a bounded chunk from a safe allowed iOS file. Use for large files instead of repeated full reads.",
+    {
+      path: z.string(),
+      offset: z.number().int().nonnegative().optional(),
+      length: z.number().int().positive().optional(),
+      encoding: z.enum(["utf8", "base64"]).optional()
+    },
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    (args) => service.readFileChunk(args.path, args.offset, args.length, args.encoding)
+  );
+
+  registerTool(
+    server,
+    logger,
+    "ios_tail_file",
+    "Read the last bytes of a safe allowed iOS text/log file.",
+    {
+      path: z.string(),
+      maxBytes: z.number().int().positive().optional()
+    },
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    (args) => service.tailFile(args.path, args.maxBytes)
+  );
+
+  registerTool(
+    server,
+    logger,
+    "ios_read_last_lines",
+    "Read the last N lines of a safe allowed iOS text/log file.",
+    {
+      path: z.string(),
+      lines: z.number().int().positive().max(5000).optional(),
+      maxBytes: z.number().int().positive().optional()
+    },
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    (args) => service.readLastLines(args.path, args.lines, args.maxBytes)
+  );
+
+  registerTool(
+    server,
+    logger,
+    "ios_download_file",
+    "Download a file from the iPhone to a safe local path on this computer without using maxReadSize.",
+    {
+      remotePath: z.string(),
+      localPath: z.string(),
+      overwrite: z.boolean().optional()
+    },
+    { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    (args) => service.downloadFile(args.remotePath, args.localPath, args.overwrite)
+  );
+
+  registerTool(
+    server,
+    logger,
+    "ios_zip_download",
+    "Download one or more safe allowed iOS files/directories as a ZIP to a safe local path on this computer.",
+    {
+      paths: z.array(z.string()).min(1),
+      localPath: z.string(),
+      overwrite: z.boolean().optional()
+    },
+    { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    (args) => service.zipDownload(args.paths, args.localPath, args.overwrite)
+  );
+
   registerWriteTool(
     server,
     logger,
@@ -137,6 +207,16 @@ export function createMcpServer(
   registerTool(
     server,
     logger,
+    "ios_exists",
+    "Check whether a safe allowed iOS path exists without throwing for missing files.",
+    { path: z.string() },
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    (args) => service.existsPath(args.path)
+  );
+
+  registerTool(
+    server,
+    logger,
     "ios_search_files",
     "Bounded recursive search under a safe allowed iOS root. Prefer ios_find_app for app lookup.",
     {
@@ -175,6 +255,77 @@ export function createMcpServer(
     { query: z.string() },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     (args) => service.findApp(args.query)
+  );
+
+  registerTool(
+    server,
+    logger,
+    "ios_list_apps",
+    "List installed App Store app bundles from the shallow app bundle roots. Optional query filters names and bundle ids.",
+    {
+      query: z.string().optional(),
+      limit: z.number().int().positive().max(500).optional()
+    },
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    (args) => service.listApps(args.query, args.limit)
+  );
+
+  registerTool(
+    server,
+    logger,
+    "ios_resolve_app_container",
+    "Resolve an app bundle id to its .app bundle, data container, and app group containers.",
+    { bundleId: z.string() },
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    (args) => service.resolveAppContainer(args.bundleId)
+  );
+
+  registerTool(
+    server,
+    logger,
+    "ios_list_preferences",
+    "List readable Library/Preferences plist files for an app bundle id.",
+    { bundleId: z.string() },
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    (args) => service.listPreferences(args.bundleId)
+  );
+
+  registerTool(
+    server,
+    logger,
+    "ios_read_preferences",
+    "Read app preference plists for a bundle id. By default reads only the exact bundle-id plist.",
+    {
+      bundleId: z.string(),
+      includeAll: z.boolean().optional(),
+      maxFiles: z.number().int().positive().max(50).optional()
+    },
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    (args) => service.readPreferences(args.bundleId, args.includeAll, args.maxFiles)
+  );
+
+  registerTool(
+    server,
+    logger,
+    "ios_read_sqlite_schema",
+    "Read table/view schema from a safe allowed SQLite database on the iPhone.",
+    { path: z.string() },
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    (args) => service.readSqliteSchema(args.path)
+  );
+
+  registerTool(
+    server,
+    logger,
+    "ios_query_sqlite",
+    "Run one read-only SQL statement against a safe allowed SQLite database on the iPhone.",
+    {
+      path: z.string(),
+      sql: z.string(),
+      limit: z.number().int().positive().max(500).optional()
+    },
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    (args) => service.querySqlite(args.path, args.sql, args.limit)
   );
 
   registerTool(

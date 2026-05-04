@@ -6,9 +6,11 @@ export type ServerConfig = {
   privateKeyPath?: string;
   passphrase?: string;
   allowedRoots: string[];
+  localArtifactRoots: string[];
   readOnly: boolean;
   allowWrites: boolean;
   maxReadSize: number;
+  sqliteMaxReadSize: number;
   searchCacheTtlMs: number;
   searchDefaultMaxResults: number;
   searchDefaultMaxDepth: number;

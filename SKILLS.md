@@ -5,11 +5,14 @@ Use this guide when the user asks to inspect files for an App Store app on their
 ## Core Rules
 
 - Use MCP tools only inside the configured allowed roots.
-- Prefer `ios_find_app(query)` for app discovery. Do not use recursive `ios_search_files` to find an app bundle unless `ios_find_app` fails.
+- Prefer `ios_resolve_app_container(bundleId)` when the bundle id is known, or `ios_find_app(query)` / `ios_list_apps(query)` for app discovery. Do not use recursive `ios_search_files` to find an app bundle unless the app tools fail.
 - If expected app directories appear empty, run `ios_diagnose_roots()` before trying broader searches.
 - Do not repeat the same `ios_search_files` call. If a search is needed, start with small limits like `maxResults=10` and `maxDepth=2`.
 - Use `includeMetadata=false` unless file size or modified time is needed.
 - Prefer `ios_list_dir`, `ios_stat`, `ios_read_plist`, and targeted `ios_read_file` calls before any write operation.
+- For large files or file export to the computer, use `ios_download_file(remotePath, localPath, overwrite)` or `ios_zip_download(paths, localPath, overwrite)` instead of `ios_read_file`.
+- For logs and large text files, use `ios_tail_file`, `ios_read_last_lines`, or `ios_read_file_chunk`.
+- For SQLite databases, use `ios_read_sqlite_schema(path)` first, then `ios_query_sqlite(path, sql, limit)` with read-only SQL. Do not dump whole database files into chat.
 - For write-capable tools, expect a two-step approval flow. The first call returns an `approvalId` and does not write. Only retry with `approvalId` after the user explicitly approves the exact operation.
 - Treat app sandbox files as private. Do not hunt for passwords, auth tokens, cookies, session databases, or keychain material unless the user explicitly asks for a specific file on their own device.
 - Do not request broader roots for `/var/Keychains`, `/private/var/db`, `/System`, `/usr`, `/bin`, or `/sbin`.
@@ -102,6 +105,7 @@ These may contain shared data used by extensions, widgets, or related apps. Comm
 
    ```text
    ios_find_app("com.google.ios.youtube")
+   ios_resolve_app_container("com.google.ios.youtube")
    ```
 
    Only if `ios_find_app` fails, use targeted shallow listing before any recursive search:
@@ -128,7 +132,7 @@ These may contain shared data used by extensions, widgets, or related apps. Comm
 
 4. Find the matching data container.
 
-   `ios_find_app` already checks data container metadata and reports matches when it can. App data containers use UUID directory names, so the directory name usually does not say "YouTube". The metadata file inside each data container maps it back to the bundle id:
+   `ios_find_app` and `ios_resolve_app_container` already check data container metadata and report matches when they can. App data containers use UUID directory names, so the directory name usually does not say "YouTube". The metadata file inside each data container maps it back to the bundle id:
 
    ```text
    /private/var/mobile/Containers/Data/Application/<UUID>/.com.apple.mobile_container_manager.metadata.plist
@@ -150,6 +154,7 @@ These may contain shared data used by extensions, widgets, or related apps. Comm
    ios_list_dir("/private/var/mobile/Containers/Data/Application/<UUID>")
    ios_list_dir("/private/var/mobile/Containers/Data/Application/<UUID>/Library")
    ios_list_dir("/private/var/mobile/Containers/Data/Application/<UUID>/Library/Preferences")
+   ios_list_preferences("com.google.ios.youtube")
    ios_stat("/private/var/mobile/Containers/Data/Application/<UUID>/Library/Preferences/com.google.ios.youtube.plist")
    ```
 
@@ -188,6 +193,7 @@ Use this sequence for a normal YouTube inspection:
 
 ```text
 ios_find_app("YouTube")
+ios_resolve_app_container("com.google.ios.youtube")
 ios_list_dir("/private/var/containers/Bundle/Application/<UUID>/YouTube.app")
 ios_stat("/private/var/containers/Bundle/Application/<UUID>/YouTube.app/Info.plist")
 ios_read_plist("/private/var/containers/Bundle/Application/<UUID>/YouTube.app/Info.plist")

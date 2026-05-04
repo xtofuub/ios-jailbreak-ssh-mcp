@@ -13,9 +13,15 @@
     "/var/jb",
     "/tmp"
   ],
+  "localArtifactRoots": [
+    ".",
+    "~/Desktop",
+    "~/Downloads"
+  ],
   "readOnly": true,
   "allowWrites": false,
-  "maxReadSize": 1048576,
+  "maxReadSize": 4194304,
+  "sqliteMaxReadSize": 67108864,
   "searchCacheTtlMs": 120000,
   "searchDefaultMaxResults": 25,
   "searchDefaultMaxDepth": 5,

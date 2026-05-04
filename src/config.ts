@@ -1,12 +1,14 @@
 import { constants } from "node:fs";
 import { access, readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { assertAllowedRootConfig, DEFAULT_ALLOWED_ROOTS } from "./pathSafety.js";
 import type { ServerConfig } from "./types.js";
 
-const ONE_MIB = 1024 * 1024;
+const FOUR_MIB = 4 * 1024 * 1024;
+const SIXTY_FOUR_MIB = 64 * 1024 * 1024;
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
 const TWO_MINUTES_MS = 2 * 60 * 1000;
 
@@ -19,9 +21,11 @@ const rawConfigSchema = z
     privateKeyPath: z.string().min(1).optional().nullable(),
     passphrase: z.string().optional().nullable(),
     allowedRoots: z.array(z.string().min(1)).optional(),
+    localArtifactRoots: z.array(z.string().min(1)).optional(),
     readOnly: z.boolean().optional(),
     allowWrites: z.boolean().optional(),
     maxReadSize: z.coerce.number().int().positive().optional(),
+    sqliteMaxReadSize: z.coerce.number().int().positive().optional(),
     searchCacheTtlMs: z.coerce.number().int().nonnegative().optional(),
     searchDefaultMaxResults: z.coerce.number().int().positive().optional(),
     searchDefaultMaxDepth: z.coerce.number().int().nonnegative().optional(),
@@ -168,6 +172,10 @@ function envConfig(): RawConfig {
     ?.split(",")
     .map((root) => root.trim())
     .filter(Boolean);
+  const localArtifactRoots = process.env.IOS_FILES_MCP_LOCAL_ARTIFACT_ROOTS
+    ?.split(",")
+    .map((root) => root.trim())
+    .filter(Boolean);
 
   return {
     host: process.env.IOS_FILES_MCP_HOST,
@@ -177,9 +185,11 @@ function envConfig(): RawConfig {
     privateKeyPath: process.env.IOS_FILES_MCP_KEY_PATH,
     passphrase: process.env.IOS_FILES_MCP_KEY_PASSPHRASE,
     allowedRoots,
+    localArtifactRoots,
     readOnly: readBooleanEnv("IOS_FILES_MCP_READ_ONLY"),
     allowWrites: readBooleanEnv("IOS_FILES_MCP_ALLOW_WRITES"),
     maxReadSize: readNumberEnv("IOS_FILES_MCP_MAX_READ_SIZE"),
+    sqliteMaxReadSize: readNumberEnv("IOS_FILES_MCP_SQLITE_MAX_READ_SIZE"),
     searchCacheTtlMs: readNumberEnv("IOS_FILES_MCP_SEARCH_CACHE_TTL_MS"),
     searchDefaultMaxResults: readNumberEnv("IOS_FILES_MCP_SEARCH_DEFAULT_MAX_RESULTS"),
     searchDefaultMaxDepth: readNumberEnv("IOS_FILES_MCP_SEARCH_DEFAULT_MAX_DEPTH"),
@@ -199,8 +209,21 @@ function pruneUndefined<T extends Record<string, unknown>>(input: T): Partial<T>
   ) as Partial<T>;
 }
 
+function expandHomePath(path: string): string {
+  if (path === "~") {
+    return homedir();
+  }
+
+  if (path.startsWith("~/") || path.startsWith("~\\")) {
+    return resolve(homedir(), path.slice(2));
+  }
+
+  return path;
+}
+
 function resolveFromBase(path: string, baseDir: string): string {
-  return isAbsolute(path) ? path : resolve(baseDir, path);
+  const expanded = expandHomePath(path);
+  return isAbsolute(expanded) ? expanded : resolve(baseDir, expanded);
 }
 
 export async function loadConfig(): Promise<ServerConfig> {
@@ -229,6 +252,14 @@ export async function loadConfig(): Promise<ServerConfig> {
   const allowedRoots = assertAllowedRootConfig(
     merged.allowedRoots ?? [...DEFAULT_ALLOWED_ROOTS]
   );
+  const defaultLocalRoots = [
+    process.cwd(),
+    resolve(homedir(), "Desktop"),
+    resolve(homedir(), "Downloads")
+  ];
+  const localArtifactRoots = (merged.localArtifactRoots ?? defaultLocalRoots).map((root) =>
+    resolveFromBase(root, loadedConfig.baseDir)
+  );
 
   return {
     host,
@@ -242,9 +273,11 @@ export async function loadConfig(): Promise<ServerConfig> {
         : undefined,
     passphrase: merged.passphrase ?? undefined,
     allowedRoots,
+    localArtifactRoots,
     readOnly: merged.readOnly ?? true,
     allowWrites: merged.allowWrites ?? false,
-    maxReadSize: merged.maxReadSize ?? ONE_MIB,
+    maxReadSize: merged.maxReadSize ?? FOUR_MIB,
+    sqliteMaxReadSize: merged.sqliteMaxReadSize ?? SIXTY_FOUR_MIB,
     searchCacheTtlMs: merged.searchCacheTtlMs ?? TWO_MINUTES_MS,
     searchDefaultMaxResults: Math.min(merged.searchDefaultMaxResults ?? 25, 500),
     searchDefaultMaxDepth: Math.min(merged.searchDefaultMaxDepth ?? 5, 25),
