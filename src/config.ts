@@ -122,7 +122,7 @@ async function loadJsonConfig(path: string | undefined): Promise<LoadedJsonConfi
   }
 
   const absolutePath = resolve(path);
-  const content = await readFile(absolutePath, "utf8");
+  const content = (await readFile(absolutePath, "utf8")).replace(/^\uFEFF/, "");
   const parsed = JSON.parse(content) as unknown;
   const result = rawConfigSchema.safeParse(parsed);
 
