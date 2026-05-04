@@ -23,6 +23,7 @@
   "maxReadSize": 4194304,
   "jsBundleMaxReadSize": 67108864,
   "sqliteMaxReadSize": 67108864,
+  "hermesDecoderPreset": "auto",
   "hermesDecoderCommand": null,
   "hermesDecoderOutputLimit": 4194304,
   "searchCacheTtlMs": 120000,

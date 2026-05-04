@@ -27,6 +27,9 @@ const rawConfigSchema = z
     maxReadSize: z.coerce.number().int().positive().optional(),
     jsBundleMaxReadSize: z.coerce.number().int().positive().optional(),
     sqliteMaxReadSize: z.coerce.number().int().positive().optional(),
+    hermesDecoderPreset: z
+      .enum(["auto", "hermesc", "hbc-decompiler", "hbc-disassembler", "hbctool", "jsc2llvm", "custom"])
+      .optional(),
     hermesDecoderCommand: z.string().min(1).optional().nullable(),
     hermesDecoderOutputLimit: z.coerce.number().int().positive().optional(),
     searchCacheTtlMs: z.coerce.number().int().nonnegative().optional(),
@@ -170,6 +173,22 @@ function readNumberEnv(name: string): number | undefined {
   return parsed;
 }
 
+function readHermesDecoderPresetEnv(): RawConfig["hermesDecoderPreset"] {
+  const value = process.env.IOS_FILES_MCP_HERMES_DECODER_PRESET;
+  if (value === undefined || value.trim() === "") {
+    return undefined;
+  }
+
+  const result = rawConfigSchema.shape.hermesDecoderPreset.safeParse(value.trim());
+  if (!result.success) {
+    throw new ConfigError(
+      "IOS_FILES_MCP_HERMES_DECODER_PRESET must be one of: auto, hermesc, hbc-decompiler, hbc-disassembler, hbctool, jsc2llvm, custom."
+    );
+  }
+
+  return result.data;
+}
+
 function envConfig(): RawConfig {
   const allowedRoots = process.env.IOS_FILES_MCP_ALLOWED_ROOTS
     ?.split(",")
@@ -194,6 +213,7 @@ function envConfig(): RawConfig {
     maxReadSize: readNumberEnv("IOS_FILES_MCP_MAX_READ_SIZE"),
     jsBundleMaxReadSize: readNumberEnv("IOS_FILES_MCP_JS_BUNDLE_MAX_READ_SIZE"),
     sqliteMaxReadSize: readNumberEnv("IOS_FILES_MCP_SQLITE_MAX_READ_SIZE"),
+    hermesDecoderPreset: readHermesDecoderPresetEnv(),
     hermesDecoderCommand: process.env.IOS_FILES_MCP_HERMES_DECODER_COMMAND,
     hermesDecoderOutputLimit: readNumberEnv("IOS_FILES_MCP_HERMES_DECODER_OUTPUT_LIMIT"),
     searchCacheTtlMs: readNumberEnv("IOS_FILES_MCP_SEARCH_CACHE_TTL_MS"),
@@ -285,6 +305,7 @@ export async function loadConfig(): Promise<ServerConfig> {
     maxReadSize: merged.maxReadSize ?? FOUR_MIB,
     jsBundleMaxReadSize: merged.jsBundleMaxReadSize ?? SIXTY_FOUR_MIB,
     sqliteMaxReadSize: merged.sqliteMaxReadSize ?? SIXTY_FOUR_MIB,
+    hermesDecoderPreset: merged.hermesDecoderPreset ?? "auto",
     hermesDecoderCommand: merged.hermesDecoderCommand ?? undefined,
     hermesDecoderOutputLimit: merged.hermesDecoderOutputLimit ?? FOUR_MIB,
     searchCacheTtlMs: merged.searchCacheTtlMs ?? TWO_MINUTES_MS,

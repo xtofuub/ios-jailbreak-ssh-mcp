@@ -282,6 +282,16 @@ export function createMcpServer(
   registerTool(
     server,
     logger,
+    "ios_list_hermes_decoders",
+    "Show configured and auto-detected local Hermes bytecode decoders such as hermes-dec, hermesc, and hbctool.",
+    {},
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    async () => service.listHermesDecoders()
+  );
+
+  registerTool(
+    server,
+    logger,
     "ios_find_app",
     "Quickly locate an App Store app by name or bundle id without recursively crawling app bundles.",
     { query: z.string() },

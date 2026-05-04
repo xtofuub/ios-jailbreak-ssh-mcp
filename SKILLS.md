@@ -13,7 +13,7 @@ Use this guide when the user asks to inspect files for an App Store app on their
 - For large files or file export to the computer, use `ios_download_file(remotePath, localPath, overwrite)` or `ios_zip_download(paths, localPath, overwrite)` instead of `ios_read_file`.
 - For logs and large text files, use `ios_tail_file`, `ios_read_last_lines`, or `ios_read_file_chunk`.
 - For SQLite databases, use `ios_read_sqlite_schema(path)` first, then `ios_query_sqlite(path, sql, limit)` with read-only SQL. Do not dump whole database files into chat.
-- For React Native bundles, use `ios_inspect_js_bundle(path)` first. Use `ios_decode_js_bundle(path, ...)` for plain `.jsbundle` beautifying or configured Hermes bytecode disassembly.
+- For React Native bundles, use `ios_inspect_js_bundle(path)` first. Use `ios_list_hermes_decoders()` if Hermes decoding fails. Use `ios_decode_js_bundle(path, ...)` for plain `.jsbundle` beautifying or Hermes bytecode decoding through `hbc-decompiler`, `hbc-disassembler`, `hermesc`, `hbctool`, or a custom command such as `jsc2llvm`.
 - For write-capable tools, expect a two-step approval flow. The first call returns an `approvalId` and does not write. Only retry with `approvalId` after the user explicitly approves the exact operation.
 - Treat app sandbox files as private. Do not hunt for passwords, auth tokens, cookies, session databases, or keychain material unless the user explicitly asks for a specific file on their own device.
 - Do not request broader roots for `/var/Keychains`, `/private/var/db`, `/System`, `/usr`, `/bin`, or `/sbin`.

@@ -208,6 +208,7 @@ IOS_FILES_MCP_REQUIRE_WRITE_APPROVAL
 IOS_FILES_MCP_MAX_READ_SIZE
 IOS_FILES_MCP_JS_BUNDLE_MAX_READ_SIZE
 IOS_FILES_MCP_SQLITE_MAX_READ_SIZE
+IOS_FILES_MCP_HERMES_DECODER_PRESET
 IOS_FILES_MCP_HERMES_DECODER_COMMAND
 IOS_FILES_MCP_HERMES_DECODER_OUTPUT_LIMIT
 IOS_FILES_MCP_SEARCH_CACHE_TTL_MS
@@ -261,6 +262,7 @@ Edit `ios-files-mcp.config.json`:
   "maxReadSize": 4194304,
   "jsBundleMaxReadSize": 67108864,
   "sqliteMaxReadSize": 67108864,
+  "hermesDecoderPreset": "auto",
   "hermesDecoderCommand": null,
   "hermesDecoderOutputLimit": 4194304,
   "searchCacheTtlMs": 120000,
@@ -275,15 +277,47 @@ Edit `ios-files-mcp.config.json`:
 
 `maxReadSize` defaults to `4194304` bytes, which is 4 MiB. `sqliteMaxReadSize` and `jsBundleMaxReadSize` default to `67108864` bytes, which is 64 MiB for read-only SQLite and React Native bundle inspection.
 
-`hermesDecoderCommand` is optional. Plain `.jsbundle` files can be beautified without it. Hermes bytecode needs an external local decoder/disassembler command because Hermes bytecode is compiled binary data, not JavaScript source.
+`hermesDecoderPreset` defaults to `auto`. Plain `.jsbundle` files can be beautified without a decoder. Hermes bytecode needs an external local decoder/disassembler because Hermes bytecode is compiled binary data, not JavaScript source.
 
-Example:
+Auto mode checks for these commands on your computer:
+
+```text
+hbc-decompiler
+hbc-disassembler
+hermesc
+hbctool
+```
+
+You can force a preset:
 
 ```json
+"hermesDecoderPreset": "hbctool"
+```
+
+Or use an exact custom command:
+
+```json
+"hermesDecoderPreset": "custom",
 "hermesDecoderCommand": "hermesc -dump-bytecode {input}"
 ```
 
-Use `{input}` for the temporary local Hermes bytecode file. If your decoder writes to a file, use `{output}` too.
+Use `{input}` for the temporary local Hermes bytecode file. If your decoder writes to a file or folder, use `{output}` too.
+
+Useful command templates:
+
+```json
+"hermesDecoderCommand": "hbc-decompiler {input} {output}"
+"hermesDecoderCommand": "hbc-disassembler {input} {output}"
+"hermesDecoderCommand": "hermesc -dump-bytecode {input}"
+"hermesDecoderCommand": "hbctool disasm {input} {output}"
+```
+
+For `jsc2llvm`, set `hermesDecoderPreset` to `custom` and provide the exact command your install uses:
+
+```json
+"hermesDecoderPreset": "custom",
+"hermesDecoderCommand": "jsc2llvm ... {input} ... {output}"
+```
 
 `ios-files-mcp.config.example.json` is only a template. If you use this file, point the MCP server at your real config with `IOS_FILES_MCP_CONFIG`.
 
@@ -456,6 +490,7 @@ Every operation is logged to `ios-files-mcp.log`. File contents and secrets are 
 | `ios_read_plist(path)` | Parses XML or binary plist files and returns JSON-safe data. |
 | `ios_inspect_js_bundle(path)` | Detects whether a React Native bundle is plain JavaScript, Hermes bytecode, or unknown binary. |
 | `ios_decode_js_bundle(path, mode, localPath, maxOutputBytes, beautify)` | Beautifies plain `.jsbundle` files or runs the configured Hermes decoder for bytecode bundles. |
+| `ios_list_hermes_decoders()` | Shows the configured decoder, auto-detected decoder commands, and setup notes. |
 
 ### Copying Files To Your Computer
 
@@ -487,7 +522,9 @@ Every operation is logged to `ios-files-mcp.log`. File contents and secrets are 
 
 Plain React Native `.jsbundle` files are JavaScript text. `ios_decode_js_bundle` can beautify them and either preview the result in the MCP response or save it to a local file.
 
-Hermes bundles are bytecode. The server can detect them, but it needs `hermesDecoderCommand` to disassemble them. The output is usually bytecode/disassembly, not the original source code.
+Hermes bundles are bytecode. The server can detect them and auto-use `hbc-decompiler`, `hbc-disassembler`, `hermesc`, or `hbctool` if one is on PATH. The output is usually pseudo-code, HASM, or bytecode/disassembly, not the original source code.
+
+Run `ios_list_hermes_decoders()` when decoding fails. It tells you what the MCP server can see from its own process.
 
 ### Writing Files
 

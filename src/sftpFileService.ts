@@ -1,5 +1,13 @@
 import { createWriteStream, existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile as writeLocalFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat as localStat,
+  writeFile as writeLocalFile
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname as localDirname, join as joinLocal, relative, resolve as resolveLocal } from "node:path";
 import { spawn } from "node:child_process";
@@ -208,10 +216,26 @@ type JsBundleInspectResult = {
 type JsBundleDecodeResult = JsBundleInspectResult & {
   mode: "preview" | "save";
   decodedKind: "beautified-js" | "hermes-disassembly" | "raw-text";
+  decoder?: string;
   content?: string;
   localPath?: string;
   bytesWritten?: number;
   stderr?: string;
+};
+
+type HermesDecoderPreset = ServerConfig["hermesDecoderPreset"];
+
+type HermesDecoderInfo = {
+  preset: HermesDecoderPreset;
+  commandName?: string;
+  commandTemplate?: string;
+  available: boolean;
+  notes: string[];
+};
+
+type HermesDecoderChoice = {
+  preset: HermesDecoderPreset;
+  commandTemplate: string;
 };
 
 type RootDiagnostic = {
@@ -237,6 +261,37 @@ const SEARCH_ABSOLUTE_MAX_DEPTH = 25;
 const APP_CONTAINER_SCAN_LIMIT = 1_000;
 const APP_METADATA_READ_LIMIT = 512 * 1024;
 const ZIP_ENTRY_LIMIT = 5_000;
+const HERMES_DECODER_PRESETS: Array<{
+  preset: Exclude<HermesDecoderPreset, "auto" | "custom" | "jsc2llvm">;
+  commandName: string;
+  commandTemplate: string;
+  notes: string[];
+}> = [
+  {
+    preset: "hbc-decompiler",
+    commandName: "hbc-decompiler",
+    commandTemplate: "hbc-decompiler {input} {output}",
+    notes: ["hermes-dec pseudo-code decompiler. Output is easier to scan but is not original source JavaScript."]
+  },
+  {
+    preset: "hbc-disassembler",
+    commandName: "hbc-disassembler",
+    commandTemplate: "hbc-disassembler {input} {output}",
+    notes: ["hermes-dec disassembler. Output is Hermes assembly/disassembly."]
+  },
+  {
+    preset: "hermesc",
+    commandName: "hermesc",
+    commandTemplate: "hermesc -dump-bytecode {input}",
+    notes: ["Official Hermes compiler binary dump mode. Output is bytecode/disassembly, not source."]
+  },
+  {
+    preset: "hbctool",
+    commandName: "hbctool",
+    commandTemplate: "hbctool disasm {input} {output}",
+    notes: ["hbctool disassembles to a directory of HASM files. Some newer HBC versions may not be supported by older hbctool builds."]
+  }
+];
 const APP_BUNDLE_ROOTS = [
   "/private/var/containers/Bundle/Application",
   "/var/containers/Bundle/Application"
@@ -696,22 +751,46 @@ export class SftpFileService {
       );
     }
 
-    if (!this.config.hermesDecoderCommand) {
-      throw new Error(
-        "Hermes bytecode detected, but no decoder command is configured. Set hermesDecoderCommand or IOS_FILES_MCP_HERMES_DECODER_COMMAND, for example: hermesc -dump-bytecode {input}"
-      );
-    }
-
-    const decoded = await this.runHermesDecoder(buffer, this.config.hermesDecoderCommand, outputLimit);
+    const decoder = await this.resolveHermesDecoder();
+    const decoded = await this.runHermesDecoder(buffer, decoder.commandTemplate, outputLimit);
     return this.bundleDecodeOutput({
       inspect,
       mode,
       decodedKind: "hermes-disassembly",
+      decoder: decoder.preset,
       content: decoded.stdout,
       localPath: options.localPath,
       outputLimit,
       stderr: decoded.stderr
     });
+  }
+
+  async listHermesDecoders(): Promise<{
+    configuredPreset: HermesDecoderPreset;
+    configuredCommand?: string;
+    selected?: HermesDecoderChoice;
+    decoders: HermesDecoderInfo[];
+    notes: string[];
+  }> {
+    const decoders = await this.hermesDecoderInfos();
+    let selected: HermesDecoderChoice | undefined;
+    const notes: string[] = [];
+
+    try {
+      selected = await this.resolveHermesDecoder();
+    } catch (error) {
+      notes.push(error instanceof Error ? error.message : String(error));
+    }
+
+    notes.push("Use hermesDecoderCommand for any decoder not covered by a built-in preset, including jsc2llvm if you have a working command template.");
+
+    return {
+      configuredPreset: this.config.hermesDecoderPreset,
+      configuredCommand: this.config.hermesDecoderCommand,
+      selected,
+      decoders,
+      notes
+    };
   }
 
   async findApp(query: string): Promise<FindAppResult> {
@@ -1428,10 +1507,99 @@ export class SftpFileService {
     return ["Unknown binary format. Use ios_download_file to inspect it with a local tool."];
   }
 
+  private async hermesDecoderInfos(): Promise<HermesDecoderInfo[]> {
+    const infos: HermesDecoderInfo[] = [];
+
+    for (const preset of HERMES_DECODER_PRESETS) {
+      infos.push({
+        preset: preset.preset,
+        commandName: preset.commandName,
+        commandTemplate: preset.commandTemplate,
+        available: await this.commandExists(preset.commandName),
+        notes: preset.notes
+      });
+    }
+
+    infos.push({
+      preset: "jsc2llvm",
+      commandName: "jsc2llvm",
+      commandTemplate: this.config.hermesDecoderCommand,
+      available: await this.commandExists("jsc2llvm"),
+      notes: [
+        "jsc2llvm does not have a verified built-in command template in this project.",
+        "Set hermesDecoderCommand to the exact jsc2llvm command you use, with {input} and optional {output}."
+      ]
+    });
+
+    if (this.config.hermesDecoderCommand) {
+      infos.push({
+        preset: "custom",
+        commandTemplate: this.config.hermesDecoderCommand,
+        available: true,
+        notes: ["Custom hermesDecoderCommand is configured."]
+      });
+    }
+
+    return infos;
+  }
+
+  private async resolveHermesDecoder(): Promise<HermesDecoderChoice> {
+    if (this.config.hermesDecoderCommand) {
+      return {
+        preset: this.config.hermesDecoderPreset === "auto" ? "custom" : this.config.hermesDecoderPreset,
+        commandTemplate: this.config.hermesDecoderCommand
+      };
+    }
+
+    if (this.config.hermesDecoderPreset === "custom") {
+      throw new Error(
+        "Hermes decoder preset is custom, but hermesDecoderCommand is empty. Set hermesDecoderCommand or IOS_FILES_MCP_HERMES_DECODER_COMMAND."
+      );
+    }
+
+    if (this.config.hermesDecoderPreset === "jsc2llvm") {
+      throw new Error(
+        "jsc2llvm preset needs an explicit hermesDecoderCommand because this project does not know your jsc2llvm command syntax. Example shape: jsc2llvm ... {input} ... {output}"
+      );
+    }
+
+    if (this.config.hermesDecoderPreset !== "auto") {
+      const preset = HERMES_DECODER_PRESETS.find((candidate) => candidate.preset === this.config.hermesDecoderPreset);
+      if (!preset) {
+        throw new Error(`Unsupported Hermes decoder preset: ${this.config.hermesDecoderPreset}`);
+      }
+
+      if (!(await this.commandExists(preset.commandName))) {
+        throw new Error(
+          `Hermes decoder preset '${preset.preset}' requires '${preset.commandName}' on PATH. Install it, use preset auto, or set hermesDecoderCommand.`
+        );
+      }
+
+      return {
+        preset: preset.preset,
+        commandTemplate: preset.commandTemplate
+      };
+    }
+
+    for (const preset of HERMES_DECODER_PRESETS) {
+      if (await this.commandExists(preset.commandName)) {
+        return {
+          preset: preset.preset,
+          commandTemplate: preset.commandTemplate
+        };
+      }
+    }
+
+    throw new Error(
+      "Hermes bytecode detected, but no supported decoder was found on PATH. Install hermes-dec (hbc-decompiler/hbc-disassembler), hermesc, or hbctool; or set hermesDecoderCommand / IOS_FILES_MCP_HERMES_DECODER_COMMAND for a custom decoder such as jsc2llvm."
+    );
+  }
+
   private async bundleDecodeOutput(options: {
     inspect: JsBundleInspectResult;
     mode: "preview" | "save";
     decodedKind: JsBundleDecodeResult["decodedKind"];
+    decoder?: string;
     content: string;
     localPath?: string;
     outputLimit: number;
@@ -1450,6 +1618,7 @@ export class SftpFileService {
         ...options.inspect,
         mode: "save",
         decodedKind: options.decodedKind,
+        decoder: options.decoder,
         localPath: safeLocalPath,
         bytesWritten: Buffer.byteLength(options.content, "utf8"),
         stderr: options.stderr
@@ -1466,6 +1635,7 @@ export class SftpFileService {
       ...options.inspect,
       mode: "preview",
       decodedKind: options.decodedKind,
+      decoder: options.decoder,
       content: clipped,
       stderr: options.stderr,
       notes:
@@ -1482,7 +1652,7 @@ export class SftpFileService {
   ): Promise<{ stdout: string; stderr: string }> {
     const tempDir = await mkdtemp(joinLocal(tmpdir(), "ios-files-mcp-hermes-"));
     const inputPath = joinLocal(tempDir, "bundle.hbc");
-    const outputPath = joinLocal(tempDir, "bundle.decoded.txt");
+    const outputPath = joinLocal(tempDir, "decoder-output");
 
     try {
       await writeLocalFile(inputPath, input);
@@ -1492,9 +1662,8 @@ export class SftpFileService {
       const result = await this.runCommand(command, outputLimit);
 
       if (commandTemplate.includes("{output}") && existsSync(outputPath)) {
-        const output = await readFile(outputPath);
         return {
-          stdout: output.subarray(0, outputLimit).toString("utf8"),
+          stdout: await this.readDecoderOutputPath(outputPath, outputLimit),
           stderr: result.stderr
         };
       }
@@ -1502,6 +1671,70 @@ export class SftpFileService {
       return result;
     } finally {
       await rm(tempDir, { recursive: true, force: true });
+    }
+  }
+
+  private async readDecoderOutputPath(path: string, outputLimit: number): Promise<string> {
+    const info = await localStat(path);
+
+    if (info.isFile()) {
+      const output = await readFile(path);
+      return output.subarray(0, outputLimit).toString("utf8");
+    }
+
+    if (!info.isDirectory()) {
+      return "";
+    }
+
+    const parts: string[] = [];
+    let remaining = outputLimit;
+    const pending = [path];
+
+    while (pending.length > 0 && remaining > 0) {
+      const current = pending.shift()!;
+      const entries = await readdir(current, { withFileTypes: true });
+
+      for (const entry of entries) {
+        const entryPath = joinLocal(current, entry.name);
+        if (entry.isDirectory()) {
+          pending.push(entryPath);
+          continue;
+        }
+
+        if (!entry.isFile()) {
+          continue;
+        }
+
+        const relativePath = relative(path, entryPath);
+        const header = `\n\n# ${relativePath}\n`;
+        parts.push(header);
+        remaining -= Buffer.byteLength(header, "utf8");
+
+        if (remaining <= 0) {
+          break;
+        }
+
+        const output = await readFile(entryPath);
+        const clipped = output.subarray(0, Math.max(0, remaining)).toString("utf8");
+        parts.push(clipped);
+        remaining -= Buffer.byteLength(clipped, "utf8");
+      }
+    }
+
+    return parts.join("").trimStart();
+  }
+
+  private async commandExists(commandName: string): Promise<boolean> {
+    const checkCommand =
+      process.platform === "win32"
+        ? `where ${this.shellQuote(commandName)}`
+        : `command -v ${this.shellQuote(commandName)}`;
+
+    try {
+      await this.runCommand(checkCommand, 1024);
+      return true;
+    } catch {
+      return false;
     }
   }
 
