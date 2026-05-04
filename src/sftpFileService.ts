@@ -80,6 +80,11 @@ type SearchCacheEntry = {
   value: Omit<SearchFilesResult, "cached">;
 };
 
+type TimedCacheEntry<T> = {
+  expiresAt: number;
+  value: T;
+};
+
 type PlistReadResult = {
   path: string;
   format: "binary" | "xml";
@@ -96,6 +101,14 @@ type AppBundleMatch = {
   bundleName?: string;
   version?: string;
   build?: string;
+};
+
+type AppBundleCandidate = {
+  appName: string;
+  appEntryName: string;
+  path: string;
+  infoPlistPath: string;
+  containerUuid: string;
 };
 
 type AppContainerMatch = {
@@ -260,6 +273,7 @@ const SEARCH_ABSOLUTE_MAX_RESULTS = 500;
 const SEARCH_ABSOLUTE_MAX_DEPTH = 25;
 const APP_CONTAINER_SCAN_LIMIT = 1_000;
 const APP_METADATA_READ_LIMIT = 512 * 1024;
+const APP_SCAN_CONCURRENCY = 8;
 const ZIP_ENTRY_LIMIT = 5_000;
 const HERMES_DECODER_PRESETS: Array<{
   preset: Exclude<HermesDecoderPreset, "auto" | "custom" | "jsc2llvm">;
@@ -334,6 +348,7 @@ export class SftpFileService {
   private connecting: Promise<Client> | undefined;
   private canonicalAllowedRoots: string[] = [];
   private readonly searchCache = new Map<string, SearchCacheEntry>();
+  private readonly appFindCache = new Map<string, TimedCacheEntry<FindAppResult>>();
 
   constructor(private readonly config: ServerConfig) {}
 
@@ -799,6 +814,14 @@ export class SftpFileService {
       throw new Error("App query must be non-empty.");
     }
 
+    const cached = this.getAppFindCache(normalizedQuery);
+    if (cached) {
+      return {
+        ...cached,
+        notes: [...cached.notes, "Returned from in-memory app lookup cache."]
+      };
+    }
+
     const client = await this.connectedClient();
     const queryLower = normalizedQuery.toLowerCase();
     const bundleMatches: AppBundleMatch[] = [];
@@ -866,7 +889,7 @@ export class SftpFileService {
       );
     }
 
-    return {
+    const result = {
       query: normalizedQuery,
       bundleMatches: this.uniqueByPath(bundleMatches),
       dataContainerMatches: this.uniqueByPath(dataContainerMatches),
@@ -875,6 +898,9 @@ export class SftpFileService {
       truncated,
       notes
     };
+
+    this.setAppFindCache(normalizedQuery, result);
+    return result;
   }
 
   async listApps(query?: string, limit = 200): Promise<ListAppsResult> {
@@ -1986,72 +2012,111 @@ export class SftpFileService {
     queryLower?: string
   ): Promise<{ matches: AppBundleMatch[]; truncated: boolean }> {
     const matches: AppBundleMatch[] = [];
-    const uuidEntries = await client.list(root);
-    let scanned = 0;
-    let truncated = false;
+    const candidatesScan = await this.scanBundleCandidates(client, root);
+    let truncated = candidatesScan.truncated;
+    let candidates = candidatesScan.candidates;
 
-    for (const uuidEntry of uuidEntries) {
-      if (this.mapEntryType(uuidEntry.type) !== "directory") {
-        continue;
-      }
+    if (queryLower) {
+      const nameMatches = candidates.filter((candidate) =>
+        this.valuesMatchQuery(queryLower, [candidate.appEntryName, candidate.appName])
+      );
 
-      scanned += 1;
-      if (scanned > APP_CONTAINER_SCAN_LIMIT) {
-        truncated = true;
-        break;
-      }
-
-      const uuidPath = this.assertCanonicalSafePath(joinRemote(root, uuidEntry.name));
-      let appEntries: Client.FileInfo[];
-      try {
-        appEntries = await client.list(uuidPath);
-      } catch {
-        continue;
-      }
-
-      for (const appEntry of appEntries) {
-        const entryType = this.mapEntryType(appEntry.type);
-        if (entryType !== "directory" || !appEntry.name.endsWith(".app")) {
-          continue;
-        }
-
-        const appPath = this.assertCanonicalSafePath(joinRemote(uuidPath, appEntry.name));
-        const infoPlistPath = this.assertCanonicalSafePath(joinRemote(appPath, "Info.plist"));
-        const parsed = await this.tryReadPlistAt(client, infoPlistPath, APP_METADATA_READ_LIMIT);
-        const plistObject = this.asRecord(parsed?.value);
-        const appName = appEntry.name.replace(/\.app$/i, "");
-        const bundleId = this.stringValue(plistObject?.CFBundleIdentifier);
-        const displayName = this.stringValue(plistObject?.CFBundleDisplayName);
-        const bundleName = this.stringValue(plistObject?.CFBundleName);
-        const version = this.stringValue(plistObject?.CFBundleShortVersionString);
-        const build = this.stringValue(plistObject?.CFBundleVersion);
-
-        if (
-          !queryLower ||
-          this.valuesMatchQuery(queryLower, [
-            appEntry.name,
-            appName,
-            bundleId,
-            displayName,
-            bundleName
-          ])
-        ) {
-          matches.push({
-            appName,
-            path: appPath,
-            infoPlistPath,
-            containerUuid: uuidEntry.name,
-            bundleId,
-            displayName,
-            bundleName,
-            version,
-            build
-          });
-        }
+      if (nameMatches.length > 0) {
+        candidates = nameMatches;
       }
     }
 
+    const parsedMatches = await this.mapLimit(candidates, APP_SCAN_CONCURRENCY, async (candidate) => {
+      const match = await this.appBundleMatchFromCandidate(client, candidate);
+
+      if (
+        queryLower &&
+        !this.valuesMatchQuery(queryLower, [
+          candidate.appEntryName,
+          match.appName,
+          match.bundleId,
+          match.displayName,
+          match.bundleName
+        ])
+      ) {
+        return undefined;
+      }
+
+      return match;
+    });
+
+    matches.push(...parsedMatches.filter((match): match is AppBundleMatch => Boolean(match)));
+
     return { matches, truncated };
+  }
+
+  private async scanBundleCandidates(
+    client: Client,
+    root: string
+  ): Promise<{ candidates: AppBundleCandidate[]; truncated: boolean }> {
+    const uuidEntries = await client.list(root);
+    const uuidDirectories = uuidEntries
+      .filter((entry) => this.mapEntryType(entry.type) === "directory")
+      .slice(0, APP_CONTAINER_SCAN_LIMIT);
+    const truncated = uuidEntries.length > uuidDirectories.length;
+
+    const candidateGroups = await this.mapLimit(
+      uuidDirectories,
+      APP_SCAN_CONCURRENCY,
+      async (uuidEntry) => {
+        const uuidPath = this.assertCanonicalSafePath(joinRemote(root, uuidEntry.name));
+        let appEntries: Client.FileInfo[];
+
+        try {
+          appEntries = await client.list(uuidPath);
+        } catch {
+          return [];
+        }
+
+        const candidates: AppBundleCandidate[] = [];
+        for (const appEntry of appEntries) {
+          if (this.mapEntryType(appEntry.type) !== "directory" || !appEntry.name.endsWith(".app")) {
+            continue;
+          }
+
+          const appPath = this.assertCanonicalSafePath(joinRemote(uuidPath, appEntry.name));
+          candidates.push({
+            appName: appEntry.name.replace(/\.app$/i, ""),
+            appEntryName: appEntry.name,
+            path: appPath,
+            infoPlistPath: this.assertCanonicalSafePath(joinRemote(appPath, "Info.plist")),
+            containerUuid: uuidEntry.name
+          });
+        }
+
+        return candidates;
+      }
+    );
+
+    return {
+      candidates: candidateGroups.flat(),
+      truncated
+    };
+  }
+
+  private async appBundleMatchFromCandidate(
+    client: Client,
+    candidate: AppBundleCandidate
+  ): Promise<AppBundleMatch> {
+    const parsed = await this.tryReadPlistAt(client, candidate.infoPlistPath, APP_METADATA_READ_LIMIT);
+    const plistObject = this.asRecord(parsed?.value);
+
+    return {
+      appName: candidate.appName,
+      path: candidate.path,
+      infoPlistPath: candidate.infoPlistPath,
+      containerUuid: candidate.containerUuid,
+      bundleId: this.stringValue(plistObject?.CFBundleIdentifier),
+      displayName: this.stringValue(plistObject?.CFBundleDisplayName),
+      bundleName: this.stringValue(plistObject?.CFBundleName),
+      version: this.stringValue(plistObject?.CFBundleShortVersionString),
+      build: this.stringValue(plistObject?.CFBundleVersion)
+    };
   }
 
   private async scanMetadataRoot(
@@ -2060,31 +2125,19 @@ export class SftpFileService {
     queryLower: string,
     bundleIds: Set<string>
   ): Promise<{ matches: AppContainerMatch[]; truncated: boolean }> {
-    const matches: AppContainerMatch[] = [];
     const entries = await client.list(root);
-    let scanned = 0;
-    let truncated = false;
+    const directories = entries
+      .filter((entry) => this.mapEntryType(entry.type) === "directory")
+      .slice(0, APP_CONTAINER_SCAN_LIMIT);
+    const truncated = entries.length > directories.length;
 
-    for (const entry of entries) {
-      if (this.mapEntryType(entry.type) !== "directory") {
-        continue;
-      }
-
-      scanned += 1;
-      if (scanned > APP_CONTAINER_SCAN_LIMIT) {
-        truncated = true;
-        break;
-      }
-
+    const matches = await this.mapLimit(directories, APP_SCAN_CONCURRENCY, async (entry) => {
       const containerPath = this.assertCanonicalSafePath(joinRemote(root, entry.name));
-      const metadataPlistPath = this.assertCanonicalSafePath(
-        joinRemote(containerPath, CONTAINER_METADATA_PLIST)
-      );
+      const metadataPlistPath = this.assertCanonicalSafePath(joinRemote(containerPath, CONTAINER_METADATA_PLIST));
       const parsed = await this.tryReadPlistAt(client, metadataPlistPath, APP_METADATA_READ_LIMIT);
       if (!parsed) {
-        continue;
+        return undefined;
       }
-
       const strings = this.collectStrings(parsed.value);
       const lowerStrings = strings.map((value) => value.toLowerCase());
       const matchedBy: string[] = [];
@@ -2100,19 +2153,22 @@ export class SftpFileService {
       }
 
       if (matchedBy.length === 0) {
-        continue;
+        return undefined;
       }
 
-      matches.push({
+      return {
         path: containerPath,
         metadataPlistPath,
         containerUuid: entry.name,
         identifiers: this.interestingIdentifiers(strings, queryLower, bundleIds),
         matchedBy
-      });
-    }
+      };
+    });
 
-    return { matches, truncated };
+    return {
+      matches: matches.filter((match): match is AppContainerMatch => Boolean(match)),
+      truncated
+    };
   }
 
   private async readPlistAt(
@@ -2296,6 +2352,59 @@ export class SftpFileService {
     }
 
     return unique;
+  }
+
+  private async mapLimit<T, R>(
+    items: T[],
+    limit: number,
+    mapper: (item: T, index: number) => Promise<R>
+  ): Promise<R[]> {
+    const results = new Array<R>(items.length);
+    let nextIndex = 0;
+
+    const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (nextIndex < items.length) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+      }
+    });
+
+    await Promise.all(workers);
+    return results;
+  }
+
+  private getAppFindCache(query: string): FindAppResult | undefined {
+    const key = query.toLowerCase();
+    const cached = this.appFindCache.get(key);
+    if (!cached) {
+      return undefined;
+    }
+
+    if (cached.expiresAt <= Date.now()) {
+      this.appFindCache.delete(key);
+      return undefined;
+    }
+
+    return cached.value;
+  }
+
+  private setAppFindCache(query: string, value: FindAppResult): void {
+    if (this.config.searchCacheTtlMs <= 0) {
+      return;
+    }
+
+    this.appFindCache.set(query.toLowerCase(), {
+      expiresAt: Date.now() + this.config.searchCacheTtlMs,
+      value
+    });
+
+    if (this.appFindCache.size > 50) {
+      const oldestKey = this.appFindCache.keys().next().value as string | undefined;
+      if (oldestKey) {
+        this.appFindCache.delete(oldestKey);
+      }
+    }
   }
 
   private searchCacheKey(
