@@ -279,6 +279,17 @@ Edit `ios-files-mcp.config.json`:
 
 `hermesDecoderPreset` defaults to `auto`. Plain `.jsbundle` files can be beautified without a decoder. Hermes bytecode needs an external local decoder/disassembler because Hermes bytecode is compiled binary data, not JavaScript source.
 
+Decoder binaries are not bundled in this repo. They are separate tools because they are platform-specific and can change faster than the MCP server. The repo includes helper scripts to install/check them.
+
+Recommended install:
+
+```powershell
+npm run install:hermes-dec
+npm run check:hermes-decoders
+```
+
+Then restart VS Code/Cline/Codex so the MCP server sees the updated PATH.
+
 Auto mode checks for these commands on your computer:
 
 ```text

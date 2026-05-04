@@ -8,12 +8,15 @@
   },
   "files": [
     "dist",
+    "scripts",
     "README.md",
     "SKILLS.md",
     "ios-files-mcp.config.example.json"
   ],
   "scripts": {
     "build": "tsc",
+    "check:hermes-decoders": "node scripts/check-hermes-decoders.mjs",
+    "install:hermes-dec": "node scripts/install-hermes-dec.mjs",
     "typecheck": "tsc --noEmit",
     "start": "node dist/index.js"
   },
