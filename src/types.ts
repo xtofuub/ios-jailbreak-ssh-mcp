@@ -25,6 +25,14 @@ export type ServerConfig = {
   connectTimeoutMs: number;
   readyTimeoutMs: number;
   logPath: string;
+  frida?: {
+    enabled: boolean;
+    jailbreakType?: "auto" | "rootless" | "rootful";
+    binaryPath?: string;
+    traceDefaultDurationMs: number;
+    maxSessionEvents: number;
+    commandTimeoutMs: number;
+  };
 };
 
 export type OperationLogEntry = {

@@ -478,6 +478,98 @@ Blocked by default:
 
 Every operation is logged to `ios-files-mcp.log`. File contents and secrets are not logged.
 
+## Frida Dynamic Analysis (Optional)
+
+Frida enables real-time runtime analysis of iOS apps — intercepting network traffic, keychain access, crypto operations, and more. Requires Frida server installed on your jailbroken iPhone.
+
+### Installation
+
+1. **Install Frida server on your iPhone:**
+
+   - Open Cydia, Sileo, or Zebra
+   - Search for `Frida` and install the latest version
+   - Or via SSH: `ssh mobile@YOUR_IP` and check `/usr/bin/frida` or `/var/jb/usr/bin/frida`
+
+2. **Enable Frida in config:**
+
+   Edit `ios-files-mcp.config.json`:
+
+   ```json
+   "frida": {
+     "enabled": true,
+     "jailbreakType": "auto",
+     "binaryPath": null,
+     "traceDefaultDurationMs": 10000,
+     "maxSessionEvents": 5000,
+     "commandTimeoutMs": 30000
+   }
+   ```
+
+   - `enabled`: Set to `true` to activate Frida tools
+   - `jailbreakType`: `"auto"` auto-detects rootless (palera1n, Dopamine) vs rootful jailbreaks. Set to `"rootless"` or `"rootful"` if auto-detection fails.
+   - `binaryPath`: Override the auto-detected Frida binary path (leave `null` to auto-detect)
+   - `traceDefaultDurationMs`: Default duration for timed traces (milliseconds)
+   - `maxSessionEvents`: Maximum events buffered per background session
+   - `commandTimeoutMs`: SSH exec timeout for Frida commands
+
+3. **Test the connection:**
+
+   Once enabled, call `ios_frida_check` to verify Frida is installed and accessible.
+
+### Hook Categories
+
+Frida tools support intercepting these runtime operations:
+
+| Category | What's captured |
+| --- | --- |
+| `network` | NSURLSession/NSURLConnection requests, URLs, methods, headers, body size |
+| `request_building` | NSMutableURLRequest construction (setHTTPMethod, setValue:forHTTPHeaderField, setHTTPBody) |
+| `keychain` | SecItem* operations (service, account, access group, class) |
+| `userdefaults` | NSUserDefaults reads and writes |
+| `sqlite` | sqlite3_exec and sqlite3_prepare SQL queries |
+| `webview` | WKWebView JS evaluation, navigation decisions, message handlers |
+| `deeplinks` | UIApplication openURL calls and app delegate URL handling |
+| `ui_actions` | UIControl sendAction, gesture recognizer events |
+| `crypto` | CCCrypt, CCHmac, SecKey operations |
+| `jailbreak_detection` | File existence checks, canOpenURL, ptrace, sysctl, dlopen |
+
+### Frida Tools
+
+| Tool | What it does | Requires Approval |
+| --- | --- | --- |
+| `ios_frida_check()` | Detect Frida installation, binary path, iOS version | No |
+| `ios_frida_list_processes()` | List all running processes on the device | No |
+| `ios_frida_list_apps()` | Fast app listing via Frida (instant, replaces SFTP scan) | No |
+| `ios_frida_app_info(bundleId)` | Get app details: entitlements, team ID, plugins, paths | No |
+| `ios_frida_start_trace(target, hookTypes, durationSeconds)` | Run hooks on a process for N seconds, return all events | Yes |
+| `ios_frida_begin_session(target, hookTypes)` | Start a background trace session, return sessionId | Yes |
+| `ios_frida_poll_events(sessionId, clearAfterRead)` | Get accumulated events from a session | No |
+| `ios_frida_end_session(sessionId)` | Stop a session and return final events | No |
+| `ios_frida_dump_ui(target)` | Get the full UIKit view hierarchy as a JSON tree | Yes |
+| `ios_frida_tap_element(target, matcher...)` | Tap a UI element by label, identifier, or className | Yes |
+| `ios_frida_run_script(target, script, durationSeconds)` | Execute a custom Frida script string | Yes |
+
+### Example: Capture Network Traffic
+
+```text
+ios_frida_start_trace("Safari", ["network"], 10)
+```
+
+On your iPhone, open a website in Safari. The tool returns all network events with URLs, methods, and headers.
+
+### Example: Interactive UI Testing
+
+```text
+1. ios_frida_begin_session("MyApp", ["ui_actions", "network"])
+2. (Let the app run for 30 seconds, tap buttons on the iPhone)
+3. ios_frida_poll_events(sessionId, true)  // Get accumulated events
+4. (Tap more buttons)
+5. ios_frida_poll_events(sessionId, true)
+6. ios_frida_end_session(sessionId)        // Stop and get final events
+```
+
+---
+
 ## Tools
 
 ### Basic Filesystem

@@ -35,5 +35,13 @@
   "writeApprovalTtlMs": 300000,
   "connectTimeoutMs": 15000,
   "readyTimeoutMs": 15000,
-  "logPath": "ios-files-mcp.log"
+  "logPath": "ios-files-mcp.log",
+  "frida": {
+    "enabled": false,
+    "jailbreakType": "auto",
+    "binaryPath": null,
+    "traceDefaultDurationMs": 10000,
+    "maxSessionEvents": 5000,
+    "commandTimeoutMs": 30000
+  }
 }

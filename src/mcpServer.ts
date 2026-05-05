@@ -3,6 +3,8 @@ import type { ShapeOutput, ZodRawShapeCompat } from "@modelcontextprotocol/sdk/s
 import type { CallToolResult, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { publicError, redactToolInput, type OperationLogger } from "./logger.js";
+import type { FridaService } from "./fridaService.js";
+import { registerFridaTools } from "./fridaTools.js";
 import type { SftpFileService } from "./sftpFileService.js";
 import type { ServerConfig } from "./types.js";
 import { WriteApprovalManager, WriteApprovalRequiredError } from "./writeApproval.js";
@@ -14,7 +16,8 @@ type ToolHandler<T extends ZodRawShapeCompat> = (args: ShapeOutput<T>) => Promis
 export function createMcpServer(
   service: SftpFileService,
   logger: OperationLogger,
-  config: ServerConfig
+  config: ServerConfig,
+  fridaService?: FridaService
 ): McpServer {
   const server = new McpServer({
     name: "ios-jailbreak-ssh-mcp",
@@ -389,6 +392,10 @@ export function createMcpServer(
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     (args) => service.hashFile(args.path)
   );
+
+  if (fridaService && config.frida?.enabled) {
+    registerFridaTools(server, logger, fridaService);
+  }
 
   return server;
 }

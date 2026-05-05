@@ -41,7 +41,17 @@ const rawConfigSchema = z
     writeApprovalTtlMs: z.coerce.number().int().positive().optional(),
     connectTimeoutMs: z.coerce.number().int().positive().optional(),
     readyTimeoutMs: z.coerce.number().int().positive().optional(),
-    logPath: z.string().min(1).optional()
+    logPath: z.string().min(1).optional(),
+    frida: z
+      .object({
+        enabled: z.boolean().optional(),
+        jailbreakType: z.enum(["auto", "rootless", "rootful"]).optional(),
+        binaryPath: z.string().min(1).optional().nullable(),
+        traceDefaultDurationMs: z.coerce.number().int().positive().optional(),
+        maxSessionEvents: z.coerce.number().int().positive().optional(),
+        commandTimeoutMs: z.coerce.number().int().positive().optional()
+      })
+      .optional()
   })
   .strict();
 
@@ -319,6 +329,16 @@ export async function loadConfig(): Promise<ServerConfig> {
     readyTimeoutMs: merged.readyTimeoutMs ?? 15_000,
     logPath: envOverrides.logPath
       ? resolve(envOverrides.logPath)
-      : resolveFromBase(fileConfig.logPath ?? "ios-files-mcp.log", loadedConfig.baseDir)
+      : resolveFromBase(fileConfig.logPath ?? "ios-files-mcp.log", loadedConfig.baseDir),
+    frida: merged.frida
+      ? {
+          enabled: merged.frida.enabled ?? false,
+          jailbreakType: merged.frida.jailbreakType ?? "auto",
+          binaryPath: merged.frida.binaryPath ?? undefined,
+          traceDefaultDurationMs: merged.frida.traceDefaultDurationMs ?? 10_000,
+          maxSessionEvents: merged.frida.maxSessionEvents ?? 5_000,
+          commandTimeoutMs: merged.frida.commandTimeoutMs ?? 30_000
+        }
+      : undefined
   };
 }

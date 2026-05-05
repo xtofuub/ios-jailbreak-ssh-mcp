@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { hasHelpFlag, helpText, loadConfig } from "./config.js";
+import { FridaService } from "./fridaService.js";
 import { OperationLogger } from "./logger.js";
 import { createMcpServer } from "./mcpServer.js";
 import { SftpFileService } from "./sftpFileService.js";
+import { SshExecService } from "./sshExecService.js";
 
 async function main(): Promise<void> {
   if (hasHelpFlag()) {
@@ -14,10 +16,18 @@ async function main(): Promise<void> {
   const config = await loadConfig();
   const logger = new OperationLogger(config);
   const service = new SftpFileService(config);
-  const server = createMcpServer(service, logger, config);
+
+  const execService = new SshExecService(config);
+  const fridaService = config.frida?.enabled
+    ? new FridaService(execService, config)
+    : undefined;
+
+  const server = createMcpServer(service, logger, config, fridaService);
   const transport = new StdioServerTransport();
 
   const shutdown = async () => {
+    await fridaService?.close();
+    await execService.close();
     await service.close();
   };
 
