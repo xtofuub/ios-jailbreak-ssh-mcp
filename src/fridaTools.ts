@@ -382,7 +382,7 @@ export function registerFridaTools(
         hookTypes: z
           .array(HOOK_TYPE_ENUM)
           .min(1)
-          .default(["network", "request_building", "keychain", "userdefaults", "sqlite", "webview", "deeplinks"])
+          .default(["network", "request_building", "keychain", "userdefaults", "sqlite", "webview", "deeplinks", "ui_actions"])
           .describe("Hook categories to enable during manual interaction")
       },
       annotations: INJECT

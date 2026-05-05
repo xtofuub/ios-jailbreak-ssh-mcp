@@ -56,6 +56,62 @@ const PREAMBLE = `
       Interceptor.attach(m.implementation, { onEnter: cb });
     } catch(_) {}
   }
+  function hookObjCLate(cls, sel, cb) {
+    var attached = false;
+    function tryAttach() {
+      if (attached) return true;
+      try {
+        if (!ObjC.available) return false;
+        var c = ObjC.classes[cls];
+        if (!c) return false;
+        var m = c[sel];
+        if (!m) return false;
+        Interceptor.attach(m.implementation, { onEnter: cb });
+        attached = true;
+        return true;
+      } catch(_) {
+        return false;
+      }
+    }
+    if (tryAttach()) return;
+    var attempts = 0;
+    var timer = setInterval(function() {
+      attempts++;
+      if (tryAttach() || attempts >= 40) {
+        try { clearInterval(timer); } catch(_) {}
+      }
+    }, 500);
+  }
+  function hookSelectorOnAllClassesLate(sel, cb) {
+    var attached = {};
+    function runPass() {
+      try {
+        if (!ObjC.available) return;
+        var classes = ObjC.classes;
+        for (var name in classes) {
+          try {
+            var c = classes[name];
+            if (!c) continue;
+            var m = c[sel];
+            if (!m) continue;
+            var key = name + '::' + sel;
+            if (attached[key]) continue;
+            Interceptor.attach(m.implementation, { onEnter: cb });
+            attached[key] = true;
+          } catch(_) {}
+        }
+      } catch(_) {}
+    }
+    runPass();
+    var passes = 0;
+    var timer = setInterval(function() {
+      passes++;
+      runPass();
+      if (passes >= 30) {
+        try { clearInterval(timer); } catch(_) {}
+      }
+    }, 1000);
+  }
   function hookC(name, cb) {
     try {
       var addr = Module.findExportByName(null, name);
@@ -91,7 +147,7 @@ const HOOK_NETWORK = `
       ['NSURLSession', '- downloadTaskWithRequest:completionHandler:']
     ];
     nsurlSessionMethods.forEach(function(pair) {
-      hookObjC(pair[0], pair[1], function(args) {
+      hookObjCLate(pair[0], pair[1], function(args) {
         try {
           var req = new ObjC.Object(args[2]);
           var headers = {};
@@ -103,8 +159,125 @@ const HOOK_NETWORK = `
       });
     });
 
+    // Catch actual send point where tokens are often attached (works even if request builders are internal/private).
+    hookObjCLate('NSURLSessionTask', '- resume', function(args) {
+      try {
+        var task = new ObjC.Object(args[0]);
+        var req = null;
+        try { req = task.currentRequest(); } catch(_) {}
+        if (!req || req.isNil()) {
+          try { req = task.originalRequest(); } catch(_) {}
+        }
+        if (req && !req.isNil()) {
+          var headers = {};
+          try { headers = dictToObj(req.allHTTPHeaderFields()); } catch(_) {}
+          var bodySize = 0;
+          try { var body = req.HTTPBody(); if (body && !body.isNil()) bodySize = body.length(); } catch(_) {}
+          se({
+            type: 'network',
+            op: 'NSURLSessionTask.resume',
+            url: ss(req.URL().absoluteString()),
+            method: ss(req.HTTPMethod()),
+            headers: headers,
+            bodySize: bodySize
+          });
+        } else {
+          se({ type: 'network', op: 'NSURLSessionTask.resume', note: 'request_unavailable' });
+        }
+      } catch(_) {}
+    });
+
+    // Response metadata callback across NSURLSession delegate implementations.
+    hookSelectorOnAllClassesLate('- URLSession:dataTask:didReceiveResponse:completionHandler:', function(args) {
+      try {
+        var dataTask = new ObjC.Object(args[3]);
+        var response = new ObjC.Object(args[4]);
+        var url = null;
+        try { url = ss(response.URL().absoluteString()); } catch(_) {}
+        var statusCode = null;
+        try {
+          if (response.respondsToSelector_(ObjC.selector('statusCode'))) {
+            statusCode = response.statusCode();
+          }
+        } catch(_) {}
+        var req = null;
+        try { req = dataTask.currentRequest(); } catch(_) {}
+        var method = null;
+        var headers = {};
+        try {
+          if (req && !req.isNil()) {
+            method = ss(req.HTTPMethod());
+            headers = dictToObj(req.allHTTPHeaderFields());
+          }
+        } catch(_) {}
+        se({
+          type: 'network_response',
+          op: 'didReceiveResponse',
+          url: url,
+          method: method,
+          statusCode: statusCode,
+          requestHeaders: headers
+        });
+      } catch(_) {}
+    });
+
+    // Response body chunks callback across NSURLSession delegate implementations.
+    hookSelectorOnAllClassesLate('- URLSession:dataTask:didReceiveData:', function(args) {
+      try {
+        var dataTask = new ObjC.Object(args[3]);
+        var data = new ObjC.Object(args[4]);
+        var size = 0;
+        try { size = data.length(); } catch(_) {}
+        var preview = null;
+        try {
+          if (size > 0) {
+            var str = ObjC.classes.NSString.alloc().initWithData_encoding_(data, 4); // NSUTF8StringEncoding
+            if (str && !str.isNil()) preview = ss(str).slice(0, 512);
+          }
+        } catch(_) {}
+        var req = null;
+        var url = null;
+        try {
+          req = dataTask.currentRequest();
+          if (req && !req.isNil()) url = ss(req.URL().absoluteString());
+        } catch(_) {}
+        se({
+          type: 'network_response',
+          op: 'didReceiveData',
+          url: url,
+          chunkSize: size,
+          bodyPreview: preview
+        });
+      } catch(_) {}
+    });
+
+    // Completion callback (success/failure) across NSURLSession delegate implementations.
+    hookSelectorOnAllClassesLate('- URLSession:task:didCompleteWithError:', function(args) {
+      try {
+        var task = new ObjC.Object(args[3]);
+        var err = new ObjC.Object(args[4]);
+        var req = null;
+        var url = null;
+        var method = null;
+        try {
+          req = task.currentRequest();
+          if (req && !req.isNil()) {
+            url = ss(req.URL().absoluteString());
+            method = ss(req.HTTPMethod());
+          }
+        } catch(_) {}
+        se({
+          type: 'network_response',
+          op: 'didCompleteWithError',
+          url: url,
+          method: method,
+          error: err && !err.isNil() ? ss(err.localizedDescription()) : null
+        });
+      } catch(_) {}
+    });
+
     // NSURLConnection (legacy)
-    hookObjC('NSURLConnection', '+ sendAsynchronousRequest:queue:completionHandler:', function(args) {
+    hookObjCLate('NSURLConnection', '+ sendAsynchronousRequest:queue:completionHandler:', function(args) {
       try {
         var req = new ObjC.Object(args[2]);
         se({ type: 'network', op: 'NSURLConnection.sendAsync', url: ss(req.URL().absoluteString()), method: ss(req.HTTPMethod()) });
@@ -112,7 +285,7 @@ const HOOK_NETWORK = `
     });
 
     // WKWebView / UIWebView loads via NSURLRequest
-    hookObjC('WKWebView', '- loadRequest:', function(args) {
+    hookObjCLate('WKWebView', '- loadRequest:', function(args) {
       try {
         var req = new ObjC.Object(args[2]);
         se({ type: 'network', op: 'WKWebView.loadRequest', url: ss(req.URL().absoluteString()) });

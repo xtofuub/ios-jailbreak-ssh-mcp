@@ -451,10 +451,9 @@ export class FridaService {
     truncated: boolean;
     fullEventsPath?: string;
   }> {
-    // Capture startup events reliably: start background trace first, then launch app.
-    const sessionId = await this.beginSession(args.bundleId, args.hookTypes);
     const launch = await this.launchApp(args.bundleId);
-    const effectiveDurationMs = Math.max(2_000, args.durationMs);
+    const sessionId = await this.beginSession(args.bundleId, args.hookTypes);
+    const effectiveDurationMs = Math.max(3_000, args.durationMs);
     const bonusSettleMs = args.tapCommonPrompts ? 1_500 : 0;
     await new Promise((r) => setTimeout(r, effectiveDurationMs + bonusSettleMs));
     const events = await this.endSession(sessionId);
