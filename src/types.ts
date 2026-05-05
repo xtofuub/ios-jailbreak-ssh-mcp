@@ -27,6 +27,7 @@ export type ServerConfig = {
   logPath: string;
   frida?: {
     enabled: boolean;
+    connectionMode?: "auto" | "ssh" | "usb";
     jailbreakType?: "auto" | "rootless" | "rootful";
     binaryPath?: string;
     traceDefaultDurationMs: number;

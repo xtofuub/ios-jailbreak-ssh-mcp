@@ -45,6 +45,7 @@ const rawConfigSchema = z
     frida: z
       .object({
         enabled: z.boolean().optional(),
+        connectionMode: z.enum(["auto", "ssh", "usb"]).optional(),
         jailbreakType: z.enum(["auto", "rootless", "rootful"]).optional(),
         binaryPath: z.string().min(1).optional().nullable(),
         traceDefaultDurationMs: z.coerce.number().int().positive().optional(),
@@ -333,6 +334,12 @@ export async function loadConfig(): Promise<ServerConfig> {
     frida: merged.frida
       ? {
           enabled: merged.frida.enabled ?? false,
+          connectionMode:
+            merged.frida.connectionMode ??
+            rawConfigSchema.shape.frida
+              .unwrap()
+              .shape.connectionMode.safeParse(process.env.IOS_FILES_MCP_FRIDA_CONNECTION_MODE).data ??
+            "auto",
           jailbreakType: merged.frida.jailbreakType ?? "auto",
           binaryPath: merged.frida.binaryPath ?? undefined,
           traceDefaultDurationMs: merged.frida.traceDefaultDurationMs ?? 10_000,

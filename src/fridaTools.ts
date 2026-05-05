@@ -322,4 +322,126 @@ export function registerFridaTools(
         )
       )
   );
+
+  // ── ios_dynamic_analyze_app ───────────────────────────────────────────────
+  server.registerTool(
+    "ios_dynamic_analyze_app",
+    {
+      description: [
+        "Business-friendly dynamic analysis workflow for an app:",
+        "- launch the app",
+        "- run a single trace session",
+        "- optionally auto-tap common consent dialogs (Allow/OK/Continue)",
+        "- return captured events",
+        "",
+        "Use follow-up questions on the returned events (URLs, headers, keychain, jailbreak checks, etc.)."
+      ].join("\n"),
+      inputSchema: {
+        bundleId: z.string().min(1).describe("App bundle identifier (e.g. com.example.App)"),
+        hookTypes: z
+          .array(HOOK_TYPE_ENUM)
+          .min(1)
+          .default(["network", "request_building", "ui_actions"])
+          .describe("Hook categories to enable"),
+        durationSeconds: z
+          .number()
+          .int()
+          .min(5)
+          .max(60)
+          .default(20)
+          .describe("How long to observe after launch (5–60 seconds)"),
+        tapCommonPrompts: z
+          .boolean()
+          .default(false)
+          .describe("Try to tap common consent dialogs during the observation window")
+      },
+      annotations: INJECT
+    },
+    (args) =>
+      wrap("ios_dynamic_analyze_app", logger, () =>
+        fridaService.dynamicAnalyzeApp({
+          bundleId: args.bundleId,
+          hookTypes: args.hookTypes as HookType[],
+          durationMs: (args.durationSeconds ?? 20) * 1000,
+          tapCommonPrompts: args.tapCommonPrompts ?? false
+        })
+      )
+  );
+
+  // ── ios_dynamic_guided_start ──────────────────────────────────────────────
+  server.registerTool(
+    "ios_dynamic_guided_start",
+    {
+      description: [
+        "Start a guided dynamic analysis session for an app.",
+        "This launches/attaches hooks and immediately returns a sessionId so the user can manually interact",
+        "(tap buttons, login, navigate screens) before collecting events."
+      ].join("\n"),
+      inputSchema: {
+        bundleId: z.string().min(1).describe("App bundle identifier (e.g. com.example.App)"),
+        hookTypes: z
+          .array(HOOK_TYPE_ENUM)
+          .min(1)
+          .default(["network", "request_building", "keychain", "userdefaults", "sqlite", "webview", "deeplinks"])
+          .describe("Hook categories to enable during manual interaction")
+      },
+      annotations: INJECT
+    },
+    (args) =>
+      wrap("ios_dynamic_guided_start", logger, async () => {
+        const launch = await fridaService.launchApp(args.bundleId);
+        const sessionId = await fridaService.beginSession(args.bundleId, args.hookTypes as HookType[]);
+        return {
+          started: true,
+          sessionId,
+          launched: launch.launched,
+          launchMethod: launch.method,
+          nextStep:
+            "Now interact with the app manually (press buttons, login, navigate), then call ios_dynamic_guided_collect with this sessionId."
+        };
+      })
+  );
+
+  // ── ios_dynamic_guided_collect ────────────────────────────────────────────
+  server.registerTool(
+    "ios_dynamic_guided_collect",
+    {
+      description: [
+        "Collect events from a guided dynamic session after manual app interaction.",
+        "Use stop=true when done to end the session and return final events."
+      ].join("\n"),
+      inputSchema: {
+        sessionId: z.string().min(1).describe("Session ID returned by ios_dynamic_guided_start"),
+        clearAfterRead: z
+          .boolean()
+          .default(true)
+          .describe("Clear buffered events after reading (recommended for incremental collection)"),
+        stop: z
+          .boolean()
+          .default(false)
+          .describe("Stop/end the session after collecting")
+      },
+      annotations: RO
+    },
+    (args) =>
+      wrap("ios_dynamic_guided_collect", logger, async () => {
+        const events = fridaService.pollSession(args.sessionId, args.clearAfterRead ?? true);
+        if (args.stop) {
+          const tail = await fridaService.endSession(args.sessionId);
+          const merged = [...events, ...tail];
+          return {
+            sessionId: args.sessionId,
+            stopped: true,
+            count: merged.length,
+            events: merged
+          };
+        }
+        return {
+          sessionId: args.sessionId,
+          stopped: false,
+          count: events.length,
+          events
+        };
+      })
+  );
 }

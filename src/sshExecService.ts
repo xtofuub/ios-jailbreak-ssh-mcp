@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { Server, createServer } from "node:net";
 import { Client } from "ssh2";
 import type { ClientChannel } from "ssh2";
 import type { ServerConfig } from "./types.js";
@@ -6,6 +7,7 @@ import type { ServerConfig } from "./types.js";
 export class SshExecService {
   private client: Client | undefined;
   private connecting: Promise<void> | undefined;
+  private hasConnected = false;
 
   constructor(private readonly config: ServerConfig) {}
 
@@ -163,19 +165,33 @@ export class SshExecService {
   private doConnect(): Promise<void> {
     return new Promise((resolve, reject) => {
       const client = new Client();
+      let settled = false;
 
       client.once("ready", () => {
+        this.hasConnected = true;
         this.client = client;
+        settled = true;
         resolve();
       });
 
-      client.once("error", (err: Error) => {
+      client.on("error", (err: Error) => {
         this.client = undefined;
-        reject(new Error(`SSH exec connection failed: ${err.message}`));
+        // During initial connect, surface a proper rejection.
+        if (!settled && !this.hasConnected) {
+          settled = true;
+          reject(new Error(`SSH exec connection failed: ${err.message}`));
+          return;
+        }
+        // After successful connect, avoid crashing the process on transport errors.
+      });
+
+      client.once("end", () => {
+        this.client = undefined;
       });
 
       client.on("close", () => {
         this.client = undefined;
+        this.hasConnected = false;
       });
 
       void this.buildConnectConfig().then((cfg) => {
@@ -199,6 +215,63 @@ export class SshExecService {
       keepaliveInterval: 10_000,
       readyTimeout: this.config.readyTimeoutMs
     };
+  }
+
+  async createLocalPortForward(
+    remoteHost: string,
+    remotePort: number
+  ): Promise<{ localPort: number; close: () => void }> {
+    const ssh = await this.connectedClient();
+
+    return new Promise((resolve, reject) => {
+      const server: Server = createServer((localSocket) => {
+        ssh.forwardOut(
+          localSocket.remoteAddress || "127.0.0.1",
+          localSocket.remotePort || 0,
+          remoteHost,
+          remotePort,
+          (err, remoteStream) => {
+            if (err) {
+              localSocket.destroy();
+              return;
+            }
+            remoteStream.on("error", () => {
+              try {
+                localSocket.destroy();
+              } catch {
+                /* ignore */
+              }
+            });
+            localSocket.on("error", () => {
+              try {
+                remoteStream.destroy();
+              } catch {
+                /* ignore */
+              }
+            });
+            localSocket.pipe(remoteStream);
+            remoteStream.pipe(localSocket);
+          }
+        );
+      });
+
+      server.listen(0, "127.0.0.1", () => {
+        const address = server.address();
+        if (address && typeof address === "object") {
+          resolve({
+            localPort: address.port,
+            close: () => server.close()
+          });
+        } else {
+          server.close();
+          reject(new Error("Failed to get local port"));
+        }
+      });
+
+      server.on("error", (err) => {
+        reject(err);
+      });
+    });
   }
 
   async close(): Promise<void> {

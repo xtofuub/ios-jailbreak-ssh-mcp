@@ -97,9 +97,9 @@ export function assertSafePath(
 }
 
 export function assertWritable(config: ServerConfig, operation: string): void {
-  if (config.readOnly || !config.allowWrites) {
+  if (config.readOnly && !config.allowWrites) {
     throw new SafetyError(
-      `${operation} is disabled. Set readOnly=false and allowWrites=true to enable write operations.`
+      `${operation} is disabled. Set readOnly=false or allowWrites=true to enable write operations.`
     );
   }
 }

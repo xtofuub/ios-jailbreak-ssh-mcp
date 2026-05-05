@@ -30,9 +30,9 @@ export class WriteApprovalManager {
   ) {}
 
   requireApproval(operation: string, args: ApprovalArgs): void {
-    if (this.config.readOnly || !this.config.allowWrites) {
+    if (this.config.readOnly && !this.config.allowWrites) {
       throw new Error(
-        `${operation} is disabled. Set readOnly=false and allowWrites=true to enable write operations.`
+        `${operation} is disabled. Set readOnly=false or allowWrites=true to enable write operations.`
       );
     }
 

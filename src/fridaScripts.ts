@@ -674,6 +674,39 @@ export function buildAppInfoScript(bundleId: string): string {
 `;
 }
 
+export function buildLaunchAppScript(bundleId: string): string {
+  const escaped = bundleId.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  return `
+'use strict';
+(function() {
+  function ss(obj) {
+    try { return obj && !obj.isNil() ? obj.toString() : null; } catch(_) { return null; }
+  }
+  ObjC.schedule(ObjC.mainQueue, function() {
+    try {
+      var workspace = ObjC.classes.LSApplicationWorkspace.defaultWorkspace();
+      var ok = false;
+      // iOS versions differ; try the common selectors.
+      try {
+        if (workspace && workspace.openApplicationWithBundleID_) {
+          ok = workspace.openApplicationWithBundleID_('${escaped}');
+        }
+      } catch(_) {}
+      try {
+        if (!ok && workspace && workspace.openApplicationWithBundleID_options_) {
+          ok = workspace.openApplicationWithBundleID_options_('${escaped}', null);
+        }
+      } catch(_) {}
+      send({ type: 'launch_app', bundleId: '${escaped}', ok: !!ok });
+    } catch(e) {
+      send({ type: 'error', message: e.toString() });
+    }
+    setTimeout(function() { send({ type: 'done' }); }, 200);
+  });
+})();
+`;
+}
+
 // ─── UI Automation Scripts ────────────────────────────────────────────────────
 
 export const UI_DUMP_SCRIPT = `
