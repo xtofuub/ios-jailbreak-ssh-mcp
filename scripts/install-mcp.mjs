@@ -1,8 +1,10 @@
 #!/usr/bin/env node
+import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const PACKAGE_SPEC = "github:xtofuub/test";
 const SERVER_NAME = "ios-files";
@@ -28,6 +30,7 @@ async function main() {
   const clients = parseClients(args.client ?? args.clients ?? process.env.IOS_FILES_MCP_INSTALL_CLIENTS ?? "all");
   const env = buildServerEnv();
   const dryRun = Boolean(args["dry-run"]);
+  const shouldInstallHermes = Boolean(args["install-hermes"] || args["with-hermes"]);
 
   for (const client of clients) {
     const target = configPathFor(client);
@@ -43,6 +46,10 @@ async function main() {
     } else {
       throw new Error(`Unsupported client '${client}'. Use claude, codex, opencode, vscode, or all.`);
     }
+  }
+
+  if (shouldInstallHermes) {
+    await installHermesDecoders(dryRun);
   }
 
   const suffix = dryRun ? "Dry run complete." : "Done. Restart your MCP client.";
@@ -139,6 +146,32 @@ async function installCodex(path, env, dryRun) {
 
   await writeTextConfig(path, updated, dryRun);
   console.log(`${dryRun ? "Would update" : "Updated"} Codex config: ${path}`);
+}
+
+function installHermesDecoders(dryRun) {
+  if (dryRun) {
+    console.log("Would install Hermes decoders with scripts/install-hermes-dec.mjs.");
+    return Promise.resolve();
+  }
+
+  const scriptDir = dirname(fileURLToPath(import.meta.url));
+  const installer = join(scriptDir, "install-hermes-dec.mjs");
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [installer], {
+      stdio: "inherit",
+      windowsHide: true
+    });
+
+    child.once("error", reject);
+    child.once("close", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`Hermes decoder installer exited with code ${code}.`));
+    });
+  });
 }
 
 function codexTomlBlock(env) {
@@ -336,8 +369,10 @@ Options:
   --password <password>        SSH password
   --key-path <path>            SSH private key path
   --passphrase <passphrase>    SSH key passphrase
+  --install-hermes             Also install optional Hermes bytecode decoders
   --dry-run                    Print config instead of writing files
 
 Postinstall auto mode:
-  IOS_FILES_MCP_INSTALL_CLIENTS=codex IOS_FILES_MCP_HOST=192.168.1.23 IOS_FILES_MCP_PASSWORD=change-me npm install github:xtofuub/test`);
+  IOS_FILES_MCP_INSTALL_CLIENTS=codex IOS_FILES_MCP_HOST=192.168.1.23 IOS_FILES_MCP_PASSWORD=change-me npm install github:xtofuub/test
+  IOS_FILES_MCP_INSTALL_HERMES=true also installs optional Hermes decoders`);
 }

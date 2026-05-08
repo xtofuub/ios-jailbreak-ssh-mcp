@@ -47,6 +47,14 @@ npx -p github:xtofuub/test iosfiles-mcp --client all --host 192.168.1.23 --passw
 
 The installer writes an `ios-files` MCP server entry and backs up existing config files to `.bak`.
 
+Full setup, including optional Hermes bytecode decoders:
+
+```powershell
+npx -p github:xtofuub/test iosfiles-mcp --client codex --host 192.168.1.23 --password change-me --install-hermes
+```
+
+Hermes decoders are only needed for React Native Hermes bytecode bundle decoding. The flag installs `hermes-dec` with Python/pipx when available.
+
 ## USB SSH
 
 Forward iPhone SSH to a local port with `iproxy`, then install using localhost:
@@ -90,6 +98,12 @@ $env:IOS_FILES_MCP_HOST="192.168.1.23"
 $env:IOS_FILES_MCP_USERNAME="mobile"
 $env:IOS_FILES_MCP_PASSWORD="change-me"
 npm install github:xtofuub/test
+```
+
+Add this env var if you also want Hermes decoders:
+
+```powershell
+$env:IOS_FILES_MCP_INSTALL_HERMES="true"
 ```
 
 Useful env vars:
