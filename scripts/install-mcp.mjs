@@ -295,8 +295,8 @@ function printHelp() {
   console.log(`Install ios-jailbreak-ssh-mcp into MCP client config.
 
 Usage:
-  ios-jailbreak-ssh-mcp-install-mcp --client codex --host 192.168.1.23 --password change-me
-  ios-jailbreak-ssh-mcp-install-mcp --client claude,opencode --host 127.0.0.1 --port 2222 --password change-me
+  iosfiles-mcp --client codex --host 192.168.1.23 --password change-me
+  iosfiles-mcp --client claude,opencode --host 127.0.0.1 --port 2222 --password change-me
 
 Clients:
   claude, codex, opencode, all

@@ -5,6 +5,7 @@
   "type": "module",
   "bin": {
     "ios-jailbreak-ssh-mcp": "./dist/index.js",
+    "iosfiles-mcp": "./scripts/install-mcp.mjs",
     "ios-jailbreak-ssh-mcp-check-hermes-decoders": "./scripts/check-hermes-decoders.mjs",
     "ios-jailbreak-ssh-mcp-install-hermes-dec": "./scripts/install-hermes-dec.mjs",
     "ios-jailbreak-ssh-mcp-install-mcp": "./scripts/install-mcp.mjs"

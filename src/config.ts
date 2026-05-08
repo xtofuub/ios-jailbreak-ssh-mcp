@@ -86,7 +86,7 @@ export function helpText(): string {
     "  }",
     "",
     "Install into a client config:",
-    "  npx -p github:xtofuub/test ios-jailbreak-ssh-mcp-install-mcp --client codex --host 192.168.1.23 --password change-me",
+    "  npx -p github:xtofuub/test iosfiles-mcp --client codex --host 192.168.1.23 --password change-me",
     "",
     "Usage:",
     "  IOS_FILES_MCP_HOST=192.168.1.23 ios-jailbreak-ssh-mcp",

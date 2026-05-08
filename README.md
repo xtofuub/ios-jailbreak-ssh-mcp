@@ -111,7 +111,7 @@ Use `IOS_FILES_MCP_INSTALL_CLIENTS="claude"`, `"codex"`, `"opencode"`, or `"all"
 You can also run the installer after install:
 
 ```powershell
-npx -p github:xtofuub/test ios-jailbreak-ssh-mcp-install-mcp --client codex --host 192.168.1.23 --password change-me
+npx -p github:xtofuub/test iosfiles-mcp --client codex --host 192.168.1.23 --password change-me
 ```
 
 The installer backs up existing config files to `.bak`, then writes the `ios-files` MCP server entry.
