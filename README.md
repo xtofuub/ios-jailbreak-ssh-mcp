@@ -6,113 +6,83 @@ Local MCP stdio server for safe SFTP access to your own jailbroken iPhone filesy
 AI MCP client -> ios-jailbreak-ssh-mcp on your PC -> SSH/SFTP -> iPhone
 ```
 
-## Requirements
+## Quick Install
+
+Requirements:
 
 - Node.js 20+
-- OpenSSH installed and running on the jailbroken iPhone
-- Your PC can SSH to the phone:
+- OpenSSH running on your jailbroken iPhone
+- Your computer can SSH to the phone
 
-```powershell
-ssh mobile@<iphone-ip>
-```
-
-## Find Your iPhone IP
-
-Most people should use the iPhone's normal Wi-Fi/LAN IP:
-
-```text
-iPhone Settings -> Wi-Fi -> tap your connected network -> IP Address
-```
-
-It usually looks like:
-
-```text
-192.168.1.23
-10.0.0.42
-```
-
-Test it from your computer:
+Find the iPhone IP in `Settings -> Wi-Fi -> your network -> IP Address`, then test:
 
 ```powershell
 ssh mobile@192.168.1.23
 ```
 
-If you are using iPhone Personal Hotspot instead of normal Wi-Fi, the phone is often:
+Run one installer command. Replace `192.168.1.23` and `change-me`.
 
-```text
-172.20.10.1
+```powershell
+npx -p github:xtofuub/test iosfiles-mcp --client codex --host 192.168.1.23 --password change-me
 ```
 
-If that does not work, run `ipconfig` on Windows and use the default gateway for the hotspot adapter.
+Use a different client with `--client`:
+
+```text
+codex      -> ~/.codex/config.toml
+claude     -> Claude Desktop config
+opencode   -> ~/.config/opencode/opencode.json
+vscode     -> .vscode/mcp.json in the current folder
+all        -> all supported clients
+```
+
+Examples:
+
+```powershell
+npx -p github:xtofuub/test iosfiles-mcp --client claude --host 192.168.1.23 --password change-me
+npx -p github:xtofuub/test iosfiles-mcp --client opencode --host 192.168.1.23 --password change-me
+npx -p github:xtofuub/test iosfiles-mcp --client vscode --host 192.168.1.23 --password change-me
+npx -p github:xtofuub/test iosfiles-mcp --client all --host 192.168.1.23 --password change-me
+```
+
+The installer writes an `ios-files` MCP server entry and backs up existing config files to `.bak`.
 
 ## USB SSH
 
-USB SSH works too. The MCP server does not need a special transport for it.
-
-Forward a local TCP port to the iPhone's SSH port with a tool such as `iproxy`, then point the MCP server at the forwarded local port.
-
-Typical example:
-
-```text
-host = 127.0.0.1
-port = 2222
-```
-
-Then test from your computer:
+Forward iPhone SSH to a local port with `iproxy`, then install using localhost:
 
 ```powershell
 ssh -p 2222 mobile@127.0.0.1
-```
-
-In MCP config, that means:
-
-```json
-"env": {
-  "IOS_FILES_MCP_HOST": "127.0.0.1",
-  "IOS_FILES_MCP_PORT": "2222",
-  "IOS_FILES_MCP_USERNAME": "mobile",
-  "IOS_FILES_MCP_PASSWORD": "change-me"
-}
-```
-
-USB SSH still uses normal SSH authentication. You still need either:
-
-```text
-- a password
-- or an SSH private key
-```
-
-So yes: USB SSH needs a password unless you set up key-based auth.
-
-## Install
-
-Use one command. Replace the host/password with your iPhone SSH details.
-
-| Client | One-liner |
-| --- | --- |
-| Codex | `npx -p github:xtofuub/test iosfiles-mcp --client codex --host 192.168.1.23 --password change-me` |
-| Claude Desktop | `npx -p github:xtofuub/test iosfiles-mcp --client claude --host 192.168.1.23 --password change-me` |
-| OpenCode | `npx -p github:xtofuub/test iosfiles-mcp --client opencode --host 192.168.1.23 --password change-me` |
-| VS Code workspace | `npx -p github:xtofuub/test iosfiles-mcp --client vscode --host 192.168.1.23 --password change-me` |
-| All supported clients | `npx -p github:xtofuub/test iosfiles-mcp --client all --host 192.168.1.23 --password change-me` |
-
-The installer backs up existing config files to `.bak`, then writes the `ios-files` MCP server entry.
-
-VS Code writes to `.vscode/mcp.json` in the folder where you run the command.
-
-USB SSH example:
-
-```powershell
 npx -p github:xtofuub/test iosfiles-mcp --client codex --host 127.0.0.1 --port 2222 --password change-me
 ```
 
-If a coding agent needs an explicit `npm install`, use:
+USB SSH still uses normal SSH auth, so use a password or SSH key.
+
+## Manual MCP Config
+
+The installer writes this command:
+
+```json
+{
+  "command": "npx",
+  "args": ["--yes", "--quiet", "github:xtofuub/test"],
+  "env": {
+    "IOS_FILES_MCP_HOST": "192.168.1.23",
+    "IOS_FILES_MCP_USERNAME": "mobile",
+    "IOS_FILES_MCP_PASSWORD": "change-me"
+  }
+}
+```
+
+Use that under `mcpServers.ios-files` for Claude/Cline-style clients, or under `servers.ios-files` for VS Code.
+
+For an explicit package install:
 
 ```powershell
 npm install github:xtofuub/test
 ```
 
-To install with `npm install` and write MCP config in the same command, pass env vars:
+To make `npm install` also write MCP config, set installer env vars first:
 
 ```powershell
 $env:IOS_FILES_MCP_INSTALL_CLIENTS="codex"
@@ -122,70 +92,7 @@ $env:IOS_FILES_MCP_PASSWORD="change-me"
 npm install github:xtofuub/test
 ```
 
-Use `IOS_FILES_MCP_INSTALL_CLIENTS="claude"`, `"codex"`, `"opencode"`, `"vscode"`, or `"all"`.
-
-For MCP config without running the installer, use `npx` directly. No clone, no local config file.
-
-### VS Code
-
-VS Code uses `servers`.
-
-```json
-{
-  "servers": {
-    "ios-files": {
-      "command": "npx",
-      "args": [
-        "--yes",
-        "--quiet",
-        "github:xtofuub/test"
-      ],
-      "env": {
-        "IOS_FILES_MCP_HOST": "192.168.1.23",
-        "IOS_FILES_MCP_PORT": "22",
-        "IOS_FILES_MCP_USERNAME": "mobile",
-        "IOS_FILES_MCP_PASSWORD": "change-me",
-        "IOS_FILES_MCP_ALLOWED_ROOTS": "/var/mobile,/private/var/mobile,/var/containers/Bundle/Application,/private/var/containers/Bundle/Application,/var/jb,/tmp",
-        "IOS_FILES_MCP_LOCAL_ARTIFACT_ROOTS": "~/Desktop,~/Downloads",
-        "IOS_FILES_MCP_READ_ONLY": "true",
-        "IOS_FILES_MCP_ALLOW_WRITES": "false",
-        "IOS_FILES_MCP_REQUIRE_WRITE_APPROVAL": "true"
-      }
-    }
-  }
-}
-```
-
-### Claude / Cline
-
-Many other MCP clients use `mcpServers`.
-
-```json
-{
-  "mcpServers": {
-    "ios-files": {
-      "command": "npx",
-      "args": [
-        "--yes",
-        "--quiet",
-        "github:xtofuub/test"
-      ],
-      "env": {
-        "IOS_FILES_MCP_HOST": "192.168.1.23",
-        "IOS_FILES_MCP_PORT": "22",
-        "IOS_FILES_MCP_USERNAME": "mobile",
-        "IOS_FILES_MCP_PASSWORD": "change-me",
-        "IOS_FILES_MCP_ALLOWED_ROOTS": "/var/mobile,/private/var/mobile,/var/containers/Bundle/Application,/private/var/containers/Bundle/Application,/var/jb,/tmp",
-        "IOS_FILES_MCP_READ_ONLY": "true",
-        "IOS_FILES_MCP_ALLOW_WRITES": "false",
-        "IOS_FILES_MCP_REQUIRE_WRITE_APPROVAL": "true"
-      }
-    }
-  }
-}
-```
-
-Supported env vars:
+Useful env vars:
 
 ```text
 IOS_FILES_MCP_HOST
@@ -193,86 +100,18 @@ IOS_FILES_MCP_PORT
 IOS_FILES_MCP_USERNAME
 IOS_FILES_MCP_PASSWORD
 IOS_FILES_MCP_KEY_PATH
-IOS_FILES_MCP_KEY_PASSPHRASE
 IOS_FILES_MCP_ALLOWED_ROOTS
-IOS_FILES_MCP_LOCAL_ARTIFACT_ROOTS
 IOS_FILES_MCP_READ_ONLY
 IOS_FILES_MCP_ALLOW_WRITES
 IOS_FILES_MCP_REQUIRE_WRITE_APPROVAL
-IOS_FILES_MCP_MAX_READ_SIZE
-IOS_FILES_MCP_JS_BUNDLE_MAX_READ_SIZE
-IOS_FILES_MCP_SQLITE_MAX_READ_SIZE
-IOS_FILES_MCP_HERMES_DECODER_PRESET
-IOS_FILES_MCP_HERMES_DECODER_COMMAND
-IOS_FILES_MCP_HERMES_DECODER_OUTPUT_LIMIT
-IOS_FILES_MCP_SEARCH_CACHE_TTL_MS
-IOS_FILES_MCP_SEARCH_DEFAULT_MAX_RESULTS
-IOS_FILES_MCP_SEARCH_DEFAULT_MAX_DEPTH
-IOS_FILES_MCP_SEARCH_MAX_ENTRIES
-IOS_FILES_MCP_BACKUP_BEFORE_WRITE
-IOS_FILES_MCP_WRITE_APPROVAL_TTL_MS
-IOS_FILES_MCP_LOG
 IOS_FILES_MCP_CONFIG
-```
-
-Installer-only env vars:
-
-```text
-IOS_FILES_MCP_INSTALL_CLIENTS
-```
-
-The installer supports:
-
-| Client | Config updated |
-| --- | --- |
-| `claude` | Claude Desktop `claude_desktop_config.json` |
-| `codex` | `~/.codex/config.toml` |
-| `opencode` | `~/.config/opencode/opencode.json` |
-| `vscode` | `.vscode/mcp.json` in the current folder |
-| `all` | All supported clients |
-
-## USB SSH MCP Config
-
-Forward a local TCP port to the iPhone's SSH port with `iproxy`, then use localhost in MCP config:
-
-```json
-{
-  "mcpServers": {
-    "ios-files": {
-      "command": "npx",
-      "args": [
-        "--yes",
-        "--quiet",
-        "github:xtofuub/test"
-      ],
-      "env": {
-        "IOS_FILES_MCP_HOST": "127.0.0.1",
-        "IOS_FILES_MCP_PORT": "2222",
-        "IOS_FILES_MCP_USERNAME": "mobile",
-        "IOS_FILES_MCP_PASSWORD": "change-me"
-      }
-    }
-  }
-}
 ```
 
 ## Optional JSON Config File
 
-Most users should use MCP `env`. JSON config files are still supported for advanced/local setups.
+Most users should use MCP `env`. JSON config files are only needed for advanced/local setups.
 
-Use your real local config file:
-
-```text
-/path/to/ios-jailbreak-ssh-mcp/ios-files-mcp.config.json
-```
-
-Create it from the example if it does not exist:
-
-```powershell
-Copy-Item .\ios-files-mcp.config.example.json .\ios-files-mcp.config.json
-```
-
-Edit `ios-files-mcp.config.json`:
+Minimal example:
 
 ```json
 {
@@ -280,94 +119,14 @@ Edit `ios-files-mcp.config.json`:
   "port": 22,
   "username": "mobile",
   "password": "change-me",
-  "privateKeyPath": null,
-  "allowedRoots": [
-    "/var/mobile",
-    "/private/var/mobile",
-    "/var/containers/Bundle/Application",
-    "/private/var/containers/Bundle/Application",
-    "/var/jb",
-    "/tmp"
-  ],
-  "localArtifactRoots": [
-    ".",
-    "~/Desktop",
-    "~/Downloads"
-  ],
   "readOnly": true,
-  "allowWrites": false,
-  "maxReadSize": 4194304,
-  "jsBundleMaxReadSize": 67108864,
-  "sqliteMaxReadSize": 67108864,
-  "hermesDecoderPreset": "auto",
-  "hermesDecoderCommand": null,
-  "hermesDecoderOutputLimit": 4194304,
-  "searchCacheTtlMs": 120000,
-  "searchDefaultMaxResults": 25,
-  "searchDefaultMaxDepth": 5,
-  "searchMaxEntries": 1500,
-  "backupBeforeWrite": true,
-  "requireWriteApproval": true,
-  "writeApprovalTtlMs": 300000
+  "allowWrites": false
 }
 ```
 
-`maxReadSize` defaults to `4194304` bytes, which is 4 MiB. `sqliteMaxReadSize` and `jsBundleMaxReadSize` default to `67108864` bytes, which is 64 MiB for read-only SQLite and React Native bundle inspection.
+See `ios-files-mcp.config.example.json` for every option.
 
-`hermesDecoderPreset` defaults to `auto`. Plain `.jsbundle` files can be beautified without a decoder. Hermes bytecode needs an external local decoder/disassembler because Hermes bytecode is compiled binary data, not JavaScript source.
-
-Decoder binaries are not bundled in this repo. They are separate tools because they are platform-specific and can change faster than the MCP server. The repo includes helper scripts to install/check them.
-
-Recommended install:
-
-```powershell
-npx -p github:xtofuub/test ios-jailbreak-ssh-mcp-install-hermes-dec
-npx -p github:xtofuub/test ios-jailbreak-ssh-mcp-check-hermes-decoders
-```
-
-Then restart VS Code/Cline/Codex so the MCP server sees the updated PATH.
-
-Auto mode checks for these commands on your computer:
-
-```text
-hbc-decompiler
-hbc-disassembler
-hermesc
-hbctool
-```
-
-You can force a preset:
-
-```json
-"hermesDecoderPreset": "hbctool"
-```
-
-Or use an exact custom command:
-
-```json
-"hermesDecoderPreset": "custom",
-"hermesDecoderCommand": "hermesc -dump-bytecode {input}"
-```
-
-Use `{input}` for the temporary local Hermes bytecode file. If your decoder writes to a file or folder, use `{output}` too.
-
-Useful command templates:
-
-```json
-"hermesDecoderCommand": "hbc-decompiler {input} {output}"
-"hermesDecoderCommand": "hbc-disassembler {input} {output}"
-"hermesDecoderCommand": "hermesc -dump-bytecode {input}"
-"hermesDecoderCommand": "hbctool disasm {input} {output}"
-```
-
-For `jsc2llvm`, set `hermesDecoderPreset` to `custom` and provide the exact command your install uses:
-
-```json
-"hermesDecoderPreset": "custom",
-"hermesDecoderCommand": "jsc2llvm ... {input} ... {output}"
-```
-
-`ios-files-mcp.config.example.json` is only a template. If you use this file, point the MCP server at your real config with `IOS_FILES_MCP_CONFIG`.
+Point MCP at the config file with `IOS_FILES_MCP_CONFIG`:
 
 ```json
 {
@@ -387,7 +146,7 @@ For `jsc2llvm`, set `hermesDecoderPreset` to `custom` and provide the exact comm
 }
 ```
 
-Other MCP clients may prefer passing the config path as args:
+Or pass it as an arg:
 
 ```json
 {
@@ -593,6 +352,13 @@ Plain React Native `.jsbundle` files are JavaScript text. `ios_decode_js_bundle`
 Hermes bundles are bytecode. The server can detect them and auto-use `hbc-decompiler`, `hbc-disassembler`, `hermesc`, or `hbctool` if one is on PATH. The output is usually pseudo-code, HASM, or bytecode/disassembly, not the original source code.
 
 Run `ios_list_hermes_decoders()` when decoding fails. It tells you what the MCP server can see from its own process.
+
+Optional decoder helper:
+
+```powershell
+npx -p github:xtofuub/test ios-jailbreak-ssh-mcp-install-hermes-dec
+npx -p github:xtofuub/test ios-jailbreak-ssh-mcp-check-hermes-decoders
+```
 
 ### Writing Files
 
