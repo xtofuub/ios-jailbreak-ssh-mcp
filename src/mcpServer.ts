@@ -25,6 +25,16 @@ export function createMcpServer(
   registerTool(
     server,
     logger,
+    "ios_doctor",
+    "Short alias for ios_connection_doctor.",
+    {},
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    async () => service.connectionDoctor()
+  );
+
+  registerTool(
+    server,
+    logger,
     "ios_connection_doctor",
     "Run a full setup doctor for SSH/SFTP connectivity, visible roots, local artifact roots, MCP config, and Hermes decoder availability.",
     {},
@@ -35,11 +45,31 @@ export function createMcpServer(
   registerTool(
     server,
     logger,
+    "ios_config",
+    "Short alias for ios_mcp_config_status.",
+    {},
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    async () => service.mcpConfigStatus()
+  );
+
+  registerTool(
+    server,
+    logger,
     "ios_mcp_config_status",
     "Inspect local MCP client config files and show whether ios-files is configured for Codex, Claude, OpenCode, and VS Code.",
     {},
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     async () => service.mcpConfigStatus()
+  );
+
+  registerTool(
+    server,
+    logger,
+    "ios_app",
+    "Short alias for ios_snapshot_app.",
+    { bundleId: z.string() },
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    (args) => service.snapshotApp(args.bundleId)
   );
 
   registerTool(
