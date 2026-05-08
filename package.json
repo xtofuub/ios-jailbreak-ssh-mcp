@@ -4,7 +4,10 @@
   "description": "Safe SSH/SFTP file access to jailbroken iOS devices for MCP-compatible AI clients.",
   "type": "module",
   "bin": {
-    "ios-jailbreak-ssh-mcp": "./dist/index.js"
+    "ios-jailbreak-ssh-mcp": "./dist/index.js",
+    "ios-jailbreak-ssh-mcp-check-hermes-decoders": "./scripts/check-hermes-decoders.mjs",
+    "ios-jailbreak-ssh-mcp-install-hermes-dec": "./scripts/install-hermes-dec.mjs",
+    "ios-jailbreak-ssh-mcp-install-mcp": "./scripts/install-mcp.mjs"
   },
   "files": [
     "dist",
@@ -16,7 +19,11 @@
   "scripts": {
     "build": "tsc",
     "check:hermes-decoders": "node scripts/check-hermes-decoders.mjs",
+    "install:mcp": "node scripts/install-mcp.mjs",
     "install:hermes-dec": "node scripts/install-hermes-dec.mjs",
+    "postinstall": "node scripts/postinstall.mjs",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run build",
     "typecheck": "tsc --noEmit",
     "start": "node dist/index.js"
   },
@@ -28,6 +35,14 @@
     "jailbreak"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xtofuub/test.git"
+  },
+  "bugs": {
+    "url": "https://github.com/xtofuub/test/issues"
+  },
+  "homepage": "https://github.com/xtofuub/test#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "archiver": "^7.0.1",

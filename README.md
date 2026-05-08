@@ -86,55 +86,35 @@ So yes: USB SSH needs a password unless you set up key-based auth.
 
 ## Install
 
-From this folder:
+Use `npx` with the GitHub repo in your MCP config. No clone, no local config file.
+
+All iPhone settings go in the MCP server `env` block.
+
+For coding agents that need an explicit install command:
 
 ```powershell
-cd /path/to/ios-jailbreak-ssh-mcp
-npm install
-npm run build
+npm install github:xtofuub/test
 ```
 
-## MCP Server Path
+To install and write MCP config in one command, pass the target client and iPhone SSH settings as env vars:
 
-MCP clients must launch the built server file with an exact absolute path.
-
-Use this server file:
-
-```text
-/path/to/ios-jailbreak-ssh-mcp/dist/index.js
+```powershell
+$env:IOS_FILES_MCP_INSTALL_CLIENTS="codex"
+$env:IOS_FILES_MCP_HOST="192.168.1.23"
+$env:IOS_FILES_MCP_USERNAME="mobile"
+$env:IOS_FILES_MCP_PASSWORD="change-me"
+npm install github:xtofuub/test
 ```
 
-Replace `/path/to/ios-jailbreak-ssh-mcp` with the actual folder where you cloned or built this repo.
+Use `IOS_FILES_MCP_INSTALL_CLIENTS="claude"`, `"codex"`, `"opencode"`, or `"all"`.
 
-Windows example:
+You can also run the installer after install:
 
-```text
-C:/Users/you/path/to/ios-jailbreak-ssh-mcp/dist/index.js
+```powershell
+npx -p github:xtofuub/test ios-jailbreak-ssh-mcp-install-mcp --client codex --host 192.168.1.23 --password change-me
 ```
 
-Do not use:
-
-```text
-.\dist\index.js
-src/index.ts
-ios-files-mcp.config.json as the command
-```
-
-For JSON strings on Windows, forward slashes are easiest:
-
-```json
-"C:/Users/you/path/to/ios-jailbreak-ssh-mcp/dist/index.js"
-```
-
-Backslashes also work, but they must be escaped:
-
-```json
-"C:\\Users\\you\\path\\to\\ios-jailbreak-ssh-mcp\\dist\\index.js"
-```
-
-## MCP Config With Credentials
-
-Recommended: put the iPhone SSH settings in the MCP server `env` block.
+The installer backs up existing config files to `.bak`, then writes the `ios-files` MCP server entry.
 
 ### VS Code
 
@@ -144,9 +124,10 @@ VS Code uses `servers`.
 {
   "servers": {
     "ios-files": {
-      "command": "node",
+      "command": "npx",
       "args": [
-        "/path/to/ios-jailbreak-ssh-mcp/dist/index.js"
+        "-y",
+        "github:xtofuub/test"
       ],
       "env": {
         "IOS_FILES_MCP_HOST": "192.168.1.23",
@@ -154,7 +135,7 @@ VS Code uses `servers`.
         "IOS_FILES_MCP_USERNAME": "mobile",
         "IOS_FILES_MCP_PASSWORD": "change-me",
         "IOS_FILES_MCP_ALLOWED_ROOTS": "/var/mobile,/private/var/mobile,/var/containers/Bundle/Application,/private/var/containers/Bundle/Application,/var/jb,/tmp",
-        "IOS_FILES_MCP_LOCAL_ARTIFACT_ROOTS": "/path/to/ios-jailbreak-ssh-mcp,/Users/you/Desktop,/Users/you/Downloads",
+        "IOS_FILES_MCP_LOCAL_ARTIFACT_ROOTS": "~/Desktop,~/Downloads",
         "IOS_FILES_MCP_READ_ONLY": "true",
         "IOS_FILES_MCP_ALLOW_WRITES": "false",
         "IOS_FILES_MCP_REQUIRE_WRITE_APPROVAL": "true"
@@ -172,9 +153,10 @@ Many other MCP clients use `mcpServers`.
 {
   "mcpServers": {
     "ios-files": {
-      "command": "node",
+      "command": "npx",
       "args": [
-        "/path/to/ios-jailbreak-ssh-mcp/dist/index.js"
+        "-y",
+        "github:xtofuub/test"
       ],
       "env": {
         "IOS_FILES_MCP_HOST": "192.168.1.23",
@@ -221,7 +203,48 @@ IOS_FILES_MCP_LOG
 IOS_FILES_MCP_CONFIG
 ```
 
+Installer-only env vars:
+
+```text
+IOS_FILES_MCP_INSTALL_CLIENTS
+```
+
+The installer supports:
+
+| Client | Config updated |
+| --- | --- |
+| `claude` | Claude Desktop `claude_desktop_config.json` |
+| `codex` | `~/.codex/config.toml` |
+| `opencode` | `~/.config/opencode/opencode.json` |
+| `all` | All supported clients |
+
+## USB SSH MCP Config
+
+Forward a local TCP port to the iPhone's SSH port with `iproxy`, then use localhost in MCP config:
+
+```json
+{
+  "mcpServers": {
+    "ios-files": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "github:xtofuub/test"
+      ],
+      "env": {
+        "IOS_FILES_MCP_HOST": "127.0.0.1",
+        "IOS_FILES_MCP_PORT": "2222",
+        "IOS_FILES_MCP_USERNAME": "mobile",
+        "IOS_FILES_MCP_PASSWORD": "change-me"
+      }
+    }
+  }
+}
+```
+
 ## Optional JSON Config File
+
+Most users should use MCP `env`. JSON config files are still supported for advanced/local setups.
 
 Use your real local config file:
 
@@ -284,8 +307,8 @@ Decoder binaries are not bundled in this repo. They are separate tools because t
 Recommended install:
 
 ```powershell
-npm run install:hermes-dec
-npm run check:hermes-decoders
+npx -p github:xtofuub/test ios-jailbreak-ssh-mcp-install-hermes-dec
+npx -p github:xtofuub/test ios-jailbreak-ssh-mcp-check-hermes-decoders
 ```
 
 Then restart VS Code/Cline/Codex so the MCP server sees the updated PATH.
@@ -336,9 +359,10 @@ For `jsc2llvm`, set `hermesDecoderPreset` to `custom` and provide the exact comm
 {
   "servers": {
     "ios-files": {
-      "command": "node",
+      "command": "npx",
       "args": [
-        "/path/to/ios-jailbreak-ssh-mcp/dist/index.js"
+        "-y",
+        "github:xtofuub/test"
       ],
       "env": {
         "IOS_FILES_MCP_CONFIG": "/path/to/ios-jailbreak-ssh-mcp/ios-files-mcp.config.json"
@@ -354,9 +378,10 @@ Other MCP clients may prefer passing the config path as args:
 {
   "mcpServers": {
     "ios-files": {
-      "command": "node",
+      "command": "npx",
       "args": [
-        "/path/to/ios-jailbreak-ssh-mcp/dist/index.js",
+        "-y",
+        "github:xtofuub/test",
         "--config",
         "/path/to/ios-jailbreak-ssh-mcp/ios-files-mcp.config.json"
       ]
@@ -370,16 +395,32 @@ Other MCP clients may prefer passing the config path as args:
 This should print help and exit:
 
 ```powershell
-node "/path/to/ios-jailbreak-ssh-mcp/dist/index.js" --help
+npx -y github:xtofuub/test --help
 ```
 
 This starts the MCP server and waits for an MCP client:
 
 ```powershell
-node "/path/to/ios-jailbreak-ssh-mcp/dist/index.js" --config "/path/to/ios-jailbreak-ssh-mcp/ios-files-mcp.config.json"
+$env:IOS_FILES_MCP_HOST="192.168.1.23"
+$env:IOS_FILES_MCP_USERNAME="mobile"
+$env:IOS_FILES_MCP_PASSWORD="change-me"
+npx -y github:xtofuub/test
 ```
 
 Press `Ctrl+C` to stop it.
+
+## Development
+
+From a clone:
+
+```powershell
+npm install
+npm run build
+npm run typecheck
+node dist/index.js --help
+```
+
+For local MCP testing without NPX, point your MCP client at `node dist/index.js` with an absolute path.
 
 ## First MCP Calls
 

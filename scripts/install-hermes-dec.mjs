@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { spawn } from "node:child_process";
 
 const hermesDecSpec = "git+https://github.com/P1sec/hermes-dec";
@@ -8,7 +9,7 @@ console.log("");
 
 const python = await findPython();
 if (!python) {
-  console.error("Could not find Python. Install Python 3 first, then rerun: npm run install:hermes-dec");
+  console.error("Could not find Python. Install Python 3 first, then rerun this helper.");
   process.exit(1);
 }
 
@@ -17,7 +18,7 @@ await run(python.command, [...python.prefixArgs, "-m", "pipx", "install", hermes
 
 console.log("");
 console.log("Done. Restart VS Code/Cline/Codex, then run:");
-console.log("  npm run check:hermes-decoders");
+console.log("  npx -p github:xtofuub/test ios-jailbreak-ssh-mcp-check-hermes-decoders");
 console.log("  ios_list_hermes_decoders()");
 
 async function findPython() {

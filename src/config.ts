@@ -76,15 +76,30 @@ export function helpText(): string {
   return [
     "ios-jailbreak-ssh-mcp",
     "",
+    "GitHub MCP config:",
+    '  "command": "npx"',
+    '  "args": ["-y", "github:xtofuub/test"]',
+    '  "env": {',
+    '    "IOS_FILES_MCP_HOST": "192.168.1.23",',
+    '    "IOS_FILES_MCP_USERNAME": "mobile",',
+    '    "IOS_FILES_MCP_PASSWORD": "change-me"',
+    "  }",
+    "",
+    "Install into a client config:",
+    "  npx -p github:xtofuub/test ios-jailbreak-ssh-mcp-install-mcp --client codex --host 192.168.1.23 --password change-me",
+    "",
     "Usage:",
-    "  ios-jailbreak-ssh-mcp --config /path/to/ios-files-mcp.config.json",
     "  IOS_FILES_MCP_HOST=192.168.1.23 ios-jailbreak-ssh-mcp",
+    "  ios-jailbreak-ssh-mcp --config /path/to/ios-files-mcp.config.json",
     "",
     "Required:",
-    "  host via config file or IOS_FILES_MCP_HOST",
+    "  IOS_FILES_MCP_HOST",
+    "  IOS_FILES_MCP_PASSWORD or IOS_FILES_MCP_KEY_PATH",
     "",
     "Safety:",
-    "  The server is read-only by default. Writes require readOnly=false and allowWrites=true."
+    "  The server is read-only by default. Writes require IOS_FILES_MCP_READ_ONLY=false and IOS_FILES_MCP_ALLOW_WRITES=true.",
+    "",
+    "JSON config files are still supported with --config or IOS_FILES_MCP_CONFIG, but MCP env config is the recommended setup."
   ].join("\n");
 }
 
@@ -265,13 +280,24 @@ export async function loadConfig(): Promise<ServerConfig> {
   const host = merged.host;
   if (!host) {
     throw new ConfigError(
-      "Missing iPhone host. Set host in ios-files-mcp.config.json, pass --config, set IOS_FILES_MCP_CONFIG, or set IOS_FILES_MCP_HOST."
+      [
+        "Missing iPhone host.",
+        "Add IOS_FILES_MCP_HOST to the MCP server env block, for example:",
+        '"env": { "IOS_FILES_MCP_HOST": "192.168.1.23" }',
+        "Advanced: host can also come from a JSON config file passed with --config or IOS_FILES_MCP_CONFIG."
+      ].join(" ")
     );
   }
 
   if (!merged.password && !merged.privateKeyPath) {
     throw new ConfigError(
-      "Missing SSH credential. Set password or privateKeyPath in config, or IOS_FILES_MCP_PASSWORD / IOS_FILES_MCP_KEY_PATH."
+      [
+        "Missing SSH credential.",
+        "Add IOS_FILES_MCP_PASSWORD or IOS_FILES_MCP_KEY_PATH to the MCP server env block.",
+        'Password example: "env": { "IOS_FILES_MCP_PASSWORD": "change-me" }',
+        'Key example: "env": { "IOS_FILES_MCP_KEY_PATH": "/Users/you/.ssh/id_ed25519" }',
+        "Advanced: password or privateKeyPath can also come from a JSON config file passed with --config or IOS_FILES_MCP_CONFIG."
+      ].join(" ")
     );
   }
 
