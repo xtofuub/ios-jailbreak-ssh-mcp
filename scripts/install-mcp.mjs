@@ -94,7 +94,7 @@ async function installMcpServersJson(path, env, dryRun) {
   config.mcpServers = objectValue(config.mcpServers);
   config.mcpServers[SERVER_NAME] = {
     command: "npx",
-    args: ["-y", PACKAGE_SPEC],
+    args: ["--yes", "--quiet", PACKAGE_SPEC],
     env
   };
 
@@ -108,7 +108,7 @@ async function installOpenCode(path, env, dryRun) {
   config.mcp = objectValue(config.mcp);
   config.mcp[SERVER_NAME] = {
     type: "local",
-    command: ["npx", "-y", PACKAGE_SPEC],
+    command: ["npx", "--yes", "--quiet", PACKAGE_SPEC],
     enabled: true,
     environment: env
   };
@@ -131,7 +131,7 @@ function codexTomlBlock(env) {
     MARKER_START,
     `[mcp_servers.${SERVER_NAME}]`,
     `command = "npx"`,
-    `args = ["-y", "${tomlString(PACKAGE_SPEC)}"]`,
+    `args = ["--yes", "--quiet", "${tomlString(PACKAGE_SPEC)}"]`,
     `env = { ${Object.entries(env)
       .map(([key, value]) => `${key} = "${tomlString(value)}"`)
       .join(", ")} }`,

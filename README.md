@@ -126,7 +126,8 @@ VS Code uses `servers`.
     "ios-files": {
       "command": "npx",
       "args": [
-        "-y",
+        "--yes",
+        "--quiet",
         "github:xtofuub/test"
       ],
       "env": {
@@ -155,7 +156,8 @@ Many other MCP clients use `mcpServers`.
     "ios-files": {
       "command": "npx",
       "args": [
-        "-y",
+        "--yes",
+        "--quiet",
         "github:xtofuub/test"
       ],
       "env": {
@@ -228,7 +230,8 @@ Forward a local TCP port to the iPhone's SSH port with `iproxy`, then use localh
     "ios-files": {
       "command": "npx",
       "args": [
-        "-y",
+        "--yes",
+        "--quiet",
         "github:xtofuub/test"
       ],
       "env": {
@@ -361,7 +364,8 @@ For `jsc2llvm`, set `hermesDecoderPreset` to `custom` and provide the exact comm
     "ios-files": {
       "command": "npx",
       "args": [
-        "-y",
+        "--yes",
+        "--quiet",
         "github:xtofuub/test"
       ],
       "env": {
@@ -380,7 +384,8 @@ Other MCP clients may prefer passing the config path as args:
     "ios-files": {
       "command": "npx",
       "args": [
-        "-y",
+        "--yes",
+        "--quiet",
         "github:xtofuub/test",
         "--config",
         "/path/to/ios-jailbreak-ssh-mcp/ios-files-mcp.config.json"
@@ -395,7 +400,7 @@ Other MCP clients may prefer passing the config path as args:
 This should print help and exit:
 
 ```powershell
-npx -y github:xtofuub/test --help
+npx --yes --quiet github:xtofuub/test --help
 ```
 
 This starts the MCP server and waits for an MCP client:
@@ -404,7 +409,7 @@ This starts the MCP server and waits for an MCP client:
 $env:IOS_FILES_MCP_HOST="192.168.1.23"
 $env:IOS_FILES_MCP_USERNAME="mobile"
 $env:IOS_FILES_MCP_PASSWORD="change-me"
-npx -y github:xtofuub/test
+npx --yes --quiet github:xtofuub/test
 ```
 
 Press `Ctrl+C` to stop it.

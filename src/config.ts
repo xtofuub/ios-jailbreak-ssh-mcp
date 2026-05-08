@@ -78,7 +78,7 @@ export function helpText(): string {
     "",
     "GitHub MCP config:",
     '  "command": "npx"',
-    '  "args": ["-y", "github:xtofuub/test"]',
+    '  "args": ["--yes", "--quiet", "github:xtofuub/test"]',
     '  "env": {',
     '    "IOS_FILES_MCP_HOST": "192.168.1.23",',
     '    "IOS_FILES_MCP_USERNAME": "mobile",',
