@@ -7,7 +7,8 @@
     "ios-files-mcp": "./dist/index.js",
     "iosfiles-mcp": "./scripts/install-mcp.mjs",
     "ios-files-mcp-check-hermes-decoders": "./scripts/check-hermes-decoders.mjs",
-    "ios-files-mcp-install-hermes-dec": "./scripts/install-hermes-dec.mjs"
+    "ios-files-mcp-install-hermes-dec": "./scripts/install-hermes-dec.mjs",
+    "ios-files-mcp-install-radare2": "./scripts/install-radare2.mjs"
   },
   "files": [
     "dist",
@@ -21,6 +22,7 @@
     "check:hermes-decoders": "node scripts/check-hermes-decoders.mjs",
     "install:mcp": "node scripts/install-mcp.mjs",
     "install:hermes-dec": "node scripts/install-hermes-dec.mjs",
+    "install:radare2": "node scripts/install-radare2.mjs",
     "postinstall": "node scripts/postinstall.mjs",
     "prepublishOnly": "npm run build",
     "typecheck": "tsc --noEmit",

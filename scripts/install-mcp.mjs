@@ -31,6 +31,7 @@ async function main() {
   const env = buildServerEnv();
   const dryRun = Boolean(args["dry-run"]);
   const shouldInstallHermes = Boolean(args["install-hermes"] || args["with-hermes"]);
+  const shouldInstallR2 = Boolean(args["install-r2"] || args["install-radare"] || args["install-radare2"] || args["with-r2"]);
 
   for (const client of clients) {
     const target = configPathFor(client);
@@ -50,6 +51,10 @@ async function main() {
 
   if (shouldInstallHermes) {
     await installHermesDecoders(dryRun);
+  }
+
+  if (shouldInstallR2) {
+    await installRadare2(dryRun);
   }
 
   const suffix = dryRun ? "Dry run complete." : "Done. Restart your MCP client.";
@@ -171,6 +176,37 @@ function installHermesDecoders(dryRun) {
         return;
       }
       reject(new Error(`Hermes decoder installer exited with code ${code}.`));
+    });
+  });
+}
+
+function installRadare2(dryRun) {
+  const scriptDir = dirname(fileURLToPath(import.meta.url));
+  const installer = join(scriptDir, "install-radare2.mjs");
+  const installerArgs = [installer];
+  const packageManager = stringArg("r2-package-manager", "IOS_FILES_MCP_R2_PACKAGE_MANAGER");
+
+  if (dryRun) {
+    installerArgs.push("--dry-run");
+  }
+
+  if (packageManager) {
+    installerArgs.push("--package-manager", packageManager);
+  }
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, installerArgs, {
+      stdio: "inherit",
+      windowsHide: true
+    });
+
+    child.once("error", reject);
+    child.once("close", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`radare2 installer exited with code ${code}.`));
     });
   });
 }
@@ -371,10 +407,13 @@ Options:
   --key-path <path>            SSH private key path
   --passphrase <passphrase>    SSH key passphrase
   --enable-r2 <true|false>     Enable local radare2 static analysis tools. Default: true
+  --install-r2                 Install local radare2 with an OS package manager
+  --r2-package-manager <name>  Package manager for --install-r2. Default: auto
   --install-hermes             Also install optional Hermes bytecode decoders
   --dry-run                    Print config instead of writing files
 
 Postinstall auto mode:
   IOS_FILES_MCP_INSTALL_CLIENTS=codex IOS_FILES_MCP_HOST=192.168.1.23 IOS_FILES_MCP_PASSWORD=change-me npm install github:xtofuub/ios-files-mcp
+  IOS_FILES_MCP_INSTALL_R2=true also installs radare2
   IOS_FILES_MCP_INSTALL_HERMES=true also installs optional Hermes decoders`);
 }

@@ -74,10 +74,18 @@ all        -> all supported clients
 
 The installer writes an `ios-files` MCP server entry and backs up existing config files to `.bak`.
 
-Full setup, including optional Hermes bytecode decoders:
+Install MCP config plus local radare2:
 
 ```powershell
-npx -p github:xtofuub/ios-files-mcp iosfiles-mcp --client codex --host 192.168.1.23 --password change-me --install-hermes
+npx -p github:xtofuub/ios-files-mcp iosfiles-mcp --client codex --host 192.168.1.23 --password change-me --install-r2
+```
+
+`--install-r2` uses a local package manager when available: `winget`, `choco`, or `scoop` on Windows; `brew` on macOS; `apt`, `dnf`, `yum`, `pacman`, `zypper`, `apk`, or `brew` on Linux. It may prompt for admin/sudo approval. Choose one explicitly with `--r2-package-manager winget`.
+
+Full setup, including radare2 and optional Hermes bytecode decoders:
+
+```powershell
+npx -p github:xtofuub/ios-files-mcp iosfiles-mcp --client codex --host 192.168.1.23 --password change-me --install-r2 --install-hermes
 ```
 
 Hermes decoders are only needed for React Native Hermes bytecode bundle decoding. The flag installs `hermes-dec` with Python/pipx when available.
@@ -127,9 +135,11 @@ $env:IOS_FILES_MCP_PASSWORD="change-me"
 npm install github:xtofuub/ios-files-mcp
 ```
 
-Add this env var if you also want Hermes decoders:
+Add these env vars if you also want radare2 or Hermes decoders:
 
 ```powershell
+$env:IOS_FILES_MCP_INSTALL_R2="true"
+$env:IOS_FILES_MCP_R2_PACKAGE_MANAGER="winget"
 $env:IOS_FILES_MCP_INSTALL_HERMES="true"
 ```
 
@@ -427,6 +437,12 @@ Requirements:
 - Install radare2 locally so `r2` and `rabin2` are on PATH.
 - The tools are enabled by default. Set `IOS_FILES_MCP_ENABLE_R2=false` only if you want to disable them.
 - Static analysis only. Frida/runtime instrumentation is intentionally not included in this module.
+
+Standalone radare2 installer:
+
+```powershell
+npx -p github:xtofuub/ios-files-mcp ios-files-mcp-install-radare2
+```
 
 Optional env:
 
