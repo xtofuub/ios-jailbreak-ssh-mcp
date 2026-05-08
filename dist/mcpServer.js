@@ -4,7 +4,7 @@ import { publicError, redactToolInput } from "./logger.js";
 import { WriteApprovalManager, WriteApprovalRequiredError } from "./writeApproval.js";
 export function createMcpServer(service, logger, config) {
     const server = new McpServer({
-        name: "ios-jailbreak-ssh-mcp",
+        name: "ios-files-mcp",
         version: "0.1.0"
     });
     const writeApprovals = new WriteApprovalManager(config);
@@ -25,7 +25,7 @@ export function createMcpServer(service, logger, config) {
         lines: z.number().int().positive().max(5000).optional(),
         maxBytes: z.number().int().positive().optional()
     }, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }, (args) => service.readLastLines(args.path, args.lines, args.maxBytes));
-    registerTool(server, logger, "ios_download_file", "Download a file from the iPhone to a safe local path on this computer without using maxReadSize.", {
+    registerTool(server, logger, "ios_download_file", "Download a file from the iOS device to a safe local path on this computer without using maxReadSize.", {
         remotePath: z.string(),
         localPath: z.string(),
         overwrite: z.boolean().optional()
@@ -99,8 +99,8 @@ export function createMcpServer(service, logger, config) {
         includeAll: z.boolean().optional(),
         maxFiles: z.number().int().positive().max(50).optional()
     }, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }, (args) => service.readPreferences(args.bundleId, args.includeAll, args.maxFiles));
-    registerTool(server, logger, "ios_read_sqlite_schema", "Read table/view schema from a safe allowed SQLite database on the iPhone.", { path: z.string() }, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }, (args) => service.readSqliteSchema(args.path));
-    registerTool(server, logger, "ios_query_sqlite", "Run one read-only SQL statement against a safe allowed SQLite database on the iPhone.", {
+    registerTool(server, logger, "ios_read_sqlite_schema", "Read table/view schema from a safe allowed SQLite database on the iOS device.", { path: z.string() }, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }, (args) => service.readSqliteSchema(args.path));
+    registerTool(server, logger, "ios_query_sqlite", "Run one read-only SQL statement against a safe allowed SQLite database on the iOS device.", {
         path: z.string(),
         sql: z.string(),
         limit: z.number().int().positive().max(500).optional()

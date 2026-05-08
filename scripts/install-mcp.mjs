@@ -6,10 +6,10 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const PACKAGE_SPEC = "github:xtofuub/test";
+const PACKAGE_SPEC = "github:xtofuub/ios-files-mcp";
 const SERVER_NAME = "ios-files";
-const MARKER_START = "# ios-jailbreak-ssh-mcp start";
-const MARKER_END = "# ios-jailbreak-ssh-mcp end";
+const MARKER_START = "# ios-files-mcp start";
+const MARKER_END = "# ios-files-mcp end";
 
 const args = parseArgs(process.argv.slice(2));
 
@@ -22,7 +22,7 @@ try {
   await main();
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
-  console.error(`ios-jailbreak-ssh-mcp MCP install failed: ${message}`);
+  console.error(`ios-files-mcp MCP install failed: ${message}`);
   process.exit(1);
 }
 
@@ -351,7 +351,7 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log(`Install ios-jailbreak-ssh-mcp into MCP client config.
+  console.log(`Install ios-files-mcp into MCP client config.
 
 Usage:
   iosfiles-mcp --client codex --host 192.168.1.23 --password change-me
@@ -363,8 +363,8 @@ Clients:
 Options:
   --client <list>              Clients to update. Default: all
   --config-path <path>         Override config path for one client. VS Code default: .vscode/mcp.json
-  --host <host>                iPhone SSH host
-  --port <port>                iPhone SSH port. Default: 22
+  --host <host>                iOS device SSH host
+  --port <port>                iOS device SSH port. Default: 22
   --username <name>            SSH username. Default: mobile
   --password <password>        SSH password
   --key-path <path>            SSH private key path
@@ -373,6 +373,6 @@ Options:
   --dry-run                    Print config instead of writing files
 
 Postinstall auto mode:
-  IOS_FILES_MCP_INSTALL_CLIENTS=codex IOS_FILES_MCP_HOST=192.168.1.23 IOS_FILES_MCP_PASSWORD=change-me npm install github:xtofuub/test
+  IOS_FILES_MCP_INSTALL_CLIENTS=codex IOS_FILES_MCP_HOST=192.168.1.23 IOS_FILES_MCP_PASSWORD=change-me npm install github:xtofuub/ios-files-mcp
   IOS_FILES_MCP_INSTALL_HERMES=true also installs optional Hermes decoders`);
 }

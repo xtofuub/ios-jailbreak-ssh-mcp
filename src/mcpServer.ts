@@ -17,7 +17,7 @@ export function createMcpServer(
   config: ServerConfig
 ): McpServer {
   const server = new McpServer({
-    name: "ios-jailbreak-ssh-mcp",
+    name: "ios-files-mcp",
     version: "0.1.0"
   });
   const writeApprovals = new WriteApprovalManager(config);
@@ -88,7 +88,7 @@ export function createMcpServer(
     server,
     logger,
     "ios_download_file",
-    "Download a file from the iPhone to a safe local path on this computer without using maxReadSize.",
+    "Download a file from the iOS device to a safe local path on this computer without using maxReadSize.",
     {
       remotePath: z.string(),
       localPath: z.string(),
@@ -350,7 +350,7 @@ export function createMcpServer(
     server,
     logger,
     "ios_read_sqlite_schema",
-    "Read table/view schema from a safe allowed SQLite database on the iPhone.",
+    "Read table/view schema from a safe allowed SQLite database on the iOS device.",
     { path: z.string() },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     (args) => service.readSqliteSchema(args.path)
@@ -360,7 +360,7 @@ export function createMcpServer(
     server,
     logger,
     "ios_query_sqlite",
-    "Run one read-only SQL statement against a safe allowed SQLite database on the iPhone.",
+    "Run one read-only SQL statement against a safe allowed SQLite database on the iOS device.",
     {
       path: z.string(),
       sql: z.string(),

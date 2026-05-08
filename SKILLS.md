@@ -1,6 +1,6 @@
 # ios-files-mcp App File Lookup Skill
 
-Use this guide when the user asks to inspect files for an App Store app on their own jailbroken iPhone through `ios-files-mcp`, for example "find YouTube's Info.plist", "look at app directories for YouTube", "where is this app's data container", or "inspect an app bundle".
+Use this guide when the user asks to inspect files for an App Store app on their own iOS device through `ios-files-mcp`, for example "find YouTube's Info.plist", "look at app directories for YouTube", "where is this app's data container", or "inspect an app bundle".
 
 ## Core Rules
 

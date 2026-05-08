@@ -1,9 +1,9 @@
-# ios-jailbreak-ssh-mcp
+# ios-files-mcp
 
-Local MCP stdio server for safe SFTP access to your own jailbroken iPhone filesystem.
+MCP stdio server for controlled SSH/SFTP access to an iOS device filesystem.
 
 ```text
-AI MCP client -> ios-jailbreak-ssh-mcp on your PC -> SSH/SFTP -> iPhone
+AI MCP client -> ios-files-mcp on your computer -> SSH/SFTP -> iOS device
 ```
 
 ## Quick Install
@@ -11,10 +11,10 @@ AI MCP client -> ios-jailbreak-ssh-mcp on your PC -> SSH/SFTP -> iPhone
 Requirements:
 
 - Node.js 20+
-- OpenSSH running on your jailbroken iPhone
-- Your computer can SSH to the phone
+- OpenSSH running on your iOS device
+- Your computer can SSH to the device
 
-Find the iPhone IP in `Settings -> Wi-Fi -> your network -> IP Address`, then test:
+Find the iOS device IP in `Settings -> Wi-Fi -> your network -> IP Address`, then test:
 
 ```powershell
 ssh mobile@192.168.1.23
@@ -23,7 +23,7 @@ ssh mobile@192.168.1.23
 Run one installer command. Replace `192.168.1.23` and `change-me`.
 
 ```powershell
-npx -p github:xtofuub/test iosfiles-mcp --client codex --host 192.168.1.23 --password change-me
+npx -p github:xtofuub/ios-files-mcp iosfiles-mcp --client codex --host 192.168.1.23 --password change-me
 ```
 
 Use a different client with `--client`:
@@ -39,10 +39,10 @@ all        -> all supported clients
 Examples:
 
 ```powershell
-npx -p github:xtofuub/test iosfiles-mcp --client claude --host 192.168.1.23 --password change-me
-npx -p github:xtofuub/test iosfiles-mcp --client opencode --host 192.168.1.23 --password change-me
-npx -p github:xtofuub/test iosfiles-mcp --client vscode --host 192.168.1.23 --password change-me
-npx -p github:xtofuub/test iosfiles-mcp --client all --host 192.168.1.23 --password change-me
+npx -p github:xtofuub/ios-files-mcp iosfiles-mcp --client claude --host 192.168.1.23 --password change-me
+npx -p github:xtofuub/ios-files-mcp iosfiles-mcp --client opencode --host 192.168.1.23 --password change-me
+npx -p github:xtofuub/ios-files-mcp iosfiles-mcp --client vscode --host 192.168.1.23 --password change-me
+npx -p github:xtofuub/ios-files-mcp iosfiles-mcp --client all --host 192.168.1.23 --password change-me
 ```
 
 The installer writes an `ios-files` MCP server entry and backs up existing config files to `.bak`.
@@ -50,18 +50,18 @@ The installer writes an `ios-files` MCP server entry and backs up existing confi
 Full setup, including optional Hermes bytecode decoders:
 
 ```powershell
-npx -p github:xtofuub/test iosfiles-mcp --client codex --host 192.168.1.23 --password change-me --install-hermes
+npx -p github:xtofuub/ios-files-mcp iosfiles-mcp --client codex --host 192.168.1.23 --password change-me --install-hermes
 ```
 
 Hermes decoders are only needed for React Native Hermes bytecode bundle decoding. The flag installs `hermes-dec` with Python/pipx when available.
 
 ## USB SSH
 
-Forward iPhone SSH to a local port with `iproxy`, then install using localhost:
+Forward iOS device SSH to a local port with `iproxy`, then install using localhost:
 
 ```powershell
 ssh -p 2222 mobile@127.0.0.1
-npx -p github:xtofuub/test iosfiles-mcp --client codex --host 127.0.0.1 --port 2222 --password change-me
+npx -p github:xtofuub/ios-files-mcp iosfiles-mcp --client codex --host 127.0.0.1 --port 2222 --password change-me
 ```
 
 USB SSH still uses normal SSH auth, so use a password or SSH key.
@@ -73,7 +73,7 @@ The installer writes this command:
 ```json
 {
   "command": "npx",
-  "args": ["--yes", "--quiet", "github:xtofuub/test"],
+  "args": ["--yes", "--quiet", "github:xtofuub/ios-files-mcp"],
   "env": {
     "IOS_FILES_MCP_HOST": "192.168.1.23",
     "IOS_FILES_MCP_USERNAME": "mobile",
@@ -87,7 +87,7 @@ Use that under `mcpServers.ios-files` for Claude/Cline-style clients, or under `
 For an explicit package install:
 
 ```powershell
-npm install github:xtofuub/test
+npm install github:xtofuub/ios-files-mcp
 ```
 
 To make `npm install` also write MCP config, set installer env vars first:
@@ -97,7 +97,7 @@ $env:IOS_FILES_MCP_INSTALL_CLIENTS="codex"
 $env:IOS_FILES_MCP_HOST="192.168.1.23"
 $env:IOS_FILES_MCP_USERNAME="mobile"
 $env:IOS_FILES_MCP_PASSWORD="change-me"
-npm install github:xtofuub/test
+npm install github:xtofuub/ios-files-mcp
 ```
 
 Add this env var if you also want Hermes decoders:
@@ -150,10 +150,10 @@ Point MCP at the config file with `IOS_FILES_MCP_CONFIG`:
       "args": [
         "--yes",
         "--quiet",
-        "github:xtofuub/test"
+        "github:xtofuub/ios-files-mcp"
       ],
       "env": {
-        "IOS_FILES_MCP_CONFIG": "/path/to/ios-jailbreak-ssh-mcp/ios-files-mcp.config.json"
+        "IOS_FILES_MCP_CONFIG": "/path/to/ios-files-mcp/ios-files-mcp.config.json"
       }
     }
   }
@@ -170,9 +170,9 @@ Or pass it as an arg:
       "args": [
         "--yes",
         "--quiet",
-        "github:xtofuub/test",
+        "github:xtofuub/ios-files-mcp",
         "--config",
-        "/path/to/ios-jailbreak-ssh-mcp/ios-files-mcp.config.json"
+        "/path/to/ios-files-mcp/ios-files-mcp.config.json"
       ]
     }
   }
@@ -184,7 +184,7 @@ Or pass it as an arg:
 This should print help and exit:
 
 ```powershell
-npx --yes --quiet github:xtofuub/test --help
+npx --yes --quiet github:xtofuub/ios-files-mcp --help
 ```
 
 This starts the MCP server and waits for an MCP client:
@@ -193,7 +193,7 @@ This starts the MCP server and waits for an MCP client:
 $env:IOS_FILES_MCP_HOST="192.168.1.23"
 $env:IOS_FILES_MCP_USERNAME="mobile"
 $env:IOS_FILES_MCP_PASSWORD="change-me"
-npx --yes --quiet github:xtofuub/test
+npx --yes --quiet github:xtofuub/ios-files-mcp
 ```
 
 Press `Ctrl+C` to stop it.
@@ -337,8 +337,8 @@ Every operation is logged to `ios-files-mcp.log`. File contents and secrets are 
 
 | Tool | What it does |
 | --- | --- |
-| `ios_download_file(remotePath, localPath, overwrite)` | Copies one file from the iPhone to an allowed local folder on your computer. This is not limited by `maxReadSize`. |
-| `ios_zip_download(paths, localPath, overwrite)` | Creates a local ZIP containing one or more iPhone files/folders. Use this for app folders, logs, or grouped exports. |
+| `ios_download_file(remotePath, localPath, overwrite)` | Copies one file from the iOS device to an allowed local folder on your computer. This is not limited by `maxReadSize`. |
+| `ios_zip_download(paths, localPath, overwrite)` | Creates a local ZIP containing one or more iOS device files/folders. Use this for app folders, logs, or grouped exports. |
 
 `localPath` must be inside `localArtifactRoots`.
 
@@ -370,8 +370,8 @@ Run `ios_list_hermes_decoders()` when decoding fails. It tells you what the MCP 
 Optional decoder helper:
 
 ```powershell
-npx -p github:xtofuub/test ios-jailbreak-ssh-mcp-install-hermes-dec
-npx -p github:xtofuub/test ios-jailbreak-ssh-mcp-check-hermes-decoders
+npx -p github:xtofuub/ios-files-mcp ios-files-mcp-install-hermes-dec
+npx -p github:xtofuub/ios-files-mcp ios-files-mcp-check-hermes-decoders
 ```
 
 ### Writing Files
@@ -384,7 +384,7 @@ These tools are disabled unless `readOnly=false` and `allowWrites=true`.
 | `ios_append_file(path, content)` | Appends UTF-8 content to a file, or creates it if missing. |
 | `ios_delete_file(path)` | Deletes a file or empty directory. |
 | `ios_move_file(from, to)` | Moves or renames a file. Existing destinations are backed up when configured. |
-| `ios_copy_file(from, to)` | Copies a file on the iPhone. Existing destinations are backed up when configured. |
+| `ios_copy_file(from, to)` | Copies a file on the iOS device. Existing destinations are backed up when configured. |
 | `ios_mkdir(path)` | Creates a directory. |
 
 Write-capable tools also accept optional `approvalId`. If `requireWriteApproval=true`, the first call returns an approval request and does not write. Retry the same tool with the returned `approvalId` only after approving the exact operation.
@@ -398,14 +398,14 @@ Write-capable tools also accept optional `approvalId`. If `requireWriteApproval=
 ## Notes
 
 - Restart the MCP client after rebuilding.
-- If directories are empty as `mobile`, try SSH/SFTP as `root` if your jailbreak supports it.
+- If directories are empty as `mobile`, try SSH/SFTP as `root` if your device exposes those directories only to root.
 - `ios_search_files` is recursive and can be slow over SFTP. Use `ios_find_app`, `ios_list_apps`, or `ios_resolve_app_container` for apps.
 - `ios_search_files` is capped and cached by default. Repeating the same search should return from memory for `searchCacheTtlMs`.
 - Keep recursive searches small first, for example `maxResults=10` and `maxDepth=2`.
 - `ios_search_files` returns concise path/type results by default. Set `includeMetadata=true` only when size and modified time are needed.
 - `ios_read_file` defaults to a 4 MiB cap through `maxReadSize`.
 - Use `ios_read_file_chunk`, `ios_tail_file`, or `ios_read_last_lines` instead of repeated full-file reads.
-- Use `ios_download_file` for one large file, or `ios_zip_download` for folders/multiple files you want copied from the iPhone to your PC.
+- Use `ios_download_file` for one large file, or `ios_zip_download` for folders/multiple files you want copied from the iOS device to your computer.
 - Use `ios_read_sqlite_schema` and `ios_query_sqlite` for read-only SQLite inspection instead of dumping whole database files into chat.
 - Use `ios_inspect_js_bundle` before `ios_decode_js_bundle` when you are not sure whether a React Native bundle is plain JavaScript or Hermes bytecode.
 - More app lookup guidance is in `SKILLS.md`.

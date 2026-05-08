@@ -1530,13 +1530,13 @@ export class SftpFileService {
         const anyDataEntries = dataRoots.some((root) => (root.entryCount ?? 0) > 0);
         const anyBundleEntries = bundleRoots.some((root) => (root.entryCount ?? 0) > 0);
         if (!anyBundleEntries) {
-            notes.push("No app bundle entries were visible. If the directories exist but are empty, try SSH/SFTP as root or check that OpenSSH on the jailbreak is exposing the full filesystem.");
+            notes.push("No app bundle entries were visible. If the directories exist but are empty, try SSH/SFTP as root or check that the SSH service exposes the expected filesystem paths.");
         }
         if (!anyDataEntries) {
             notes.push("No app data container entries were visible. App data should normally appear under /var/mobile/Containers/Data/Application or /private/var/mobile/Containers/Data/Application.");
         }
         if (this.config.username === "mobile" && (!anyBundleEntries || !anyDataEntries)) {
-            notes.push("The current SSH username is mobile. Some jailbreak setups require username root to browse all app bundle/container directories.");
+            notes.push("The current SSH username is mobile. Some SSH setups require username root to browse all app bundle/container directories.");
         }
         return notes;
     }

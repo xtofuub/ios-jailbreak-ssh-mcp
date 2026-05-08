@@ -18,7 +18,7 @@ await run(python.command, [...python.prefixArgs, "-m", "pipx", "install", hermes
 
 console.log("");
 console.log("Done. Restart VS Code/Cline/Codex, then run:");
-console.log("  npx -p github:xtofuub/test ios-jailbreak-ssh-mcp-check-hermes-decoders");
+console.log("  npx -p github:xtofuub/ios-files-mcp ios-files-mcp-check-hermes-decoders");
 console.log("  ios_list_hermes_decoders()");
 
 async function findPython() {

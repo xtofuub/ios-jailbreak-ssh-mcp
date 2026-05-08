@@ -63,11 +63,11 @@ export function hasHelpFlag(argv = process.argv.slice(2)) {
 }
 export function helpText() {
     return [
-        "ios-jailbreak-ssh-mcp",
+        "ios-files-mcp",
         "",
         "GitHub MCP config:",
         '  "command": "npx"',
-        '  "args": ["--yes", "--quiet", "github:xtofuub/test"]',
+        '  "args": ["--yes", "--quiet", "github:xtofuub/ios-files-mcp"]',
         '  "env": {',
         '    "IOS_FILES_MCP_HOST": "192.168.1.23",',
         '    "IOS_FILES_MCP_USERNAME": "mobile",',
@@ -75,11 +75,11 @@ export function helpText() {
         "  }",
         "",
         "Install into a client config:",
-        "  npx -p github:xtofuub/test iosfiles-mcp --client codex --host 192.168.1.23 --password change-me",
+        "  npx -p github:xtofuub/ios-files-mcp iosfiles-mcp --client codex --host 192.168.1.23 --password change-me",
         "",
         "Usage:",
-        "  IOS_FILES_MCP_HOST=192.168.1.23 ios-jailbreak-ssh-mcp",
-        "  ios-jailbreak-ssh-mcp --config /path/to/ios-files-mcp.config.json",
+        "  IOS_FILES_MCP_HOST=192.168.1.23 ios-files-mcp",
+        "  ios-files-mcp --config /path/to/ios-files-mcp.config.json",
         "",
         "Required:",
         "  IOS_FILES_MCP_HOST",
@@ -232,7 +232,7 @@ export async function loadConfig() {
     const host = merged.host;
     if (!host) {
         throw new ConfigError([
-            "Missing iPhone host.",
+            "Missing iOS device host.",
             "Add IOS_FILES_MCP_HOST to the MCP server env block, for example:",
             '"env": { "IOS_FILES_MCP_HOST": "192.168.1.23" }',
             "Advanced: host can also come from a JSON config file passed with --config or IOS_FILES_MCP_CONFIG."

@@ -2237,7 +2237,7 @@ export class SftpFileService {
 
     if (!anyBundleEntries) {
       notes.push(
-        "No app bundle entries were visible. If the directories exist but are empty, try SSH/SFTP as root or check that OpenSSH on the jailbreak is exposing the full filesystem."
+        "No app bundle entries were visible. If the directories exist but are empty, try SSH/SFTP as root or check that the SSH service exposes the expected filesystem paths."
       );
     }
 
@@ -2249,7 +2249,7 @@ export class SftpFileService {
 
     if (this.config.username === "mobile" && (!anyBundleEntries || !anyDataEntries)) {
       notes.push(
-        "The current SSH username is mobile. Some jailbreak setups require username root to browse all app bundle/container directories."
+        "The current SSH username is mobile. Some SSH setups require username root to browse all app bundle/container directories."
       );
     }
 
