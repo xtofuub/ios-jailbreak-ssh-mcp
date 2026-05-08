@@ -431,11 +431,11 @@ Write-capable tools also accept optional `approvalId`. If `requireWriteApproval=
 
 | Tool | What it does |
 | --- | --- |
-| `ios_doctor()` | Short alias for `ios_connection_doctor()`. |
+| `ios_doctor()` | Finds setup problems: SSH/SFTP connection, visible app roots, local export folders, MCP config, and Hermes decoder availability. |
 | `ios_connection_doctor()` | Checks SSH/SFTP connection, visible roots, local artifact roots, MCP config, and Hermes decoder availability. |
-| `ios_config()` | Short alias for `ios_mcp_config_status()`. |
+| `ios_config()` | Checks whether Codex, Claude, OpenCode, and VS Code are configured to launch this MCP server correctly. |
 | `ios_mcp_config_status()` | Shows whether Codex, Claude, OpenCode, and VS Code config files contain the expected `ios-files` server entry. |
-| `ios_app(bundleId)` | Short alias for `ios_snapshot_app(bundleId)`. |
+| `ios_app(bundleId)` | Gives a quick app overview: bundle path, data container, app groups, Info.plist summary, preference files, SQLite files, and JS bundles. |
 | `ios_snapshot_app(bundleId)` | Builds a metadata-focused app snapshot: bundle/data/app-group paths, Info.plist summary, preference files, SQLite files, and JS bundles. |
 | `ios_diagnose_roots()` | Checks whether common iOS app roots are visible over the current SSH/SFTP login and gives notes for empty directories. |
 
