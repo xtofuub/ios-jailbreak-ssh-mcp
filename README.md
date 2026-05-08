@@ -20,13 +20,49 @@ Find the iOS device IP in `Settings -> Wi-Fi -> your network -> IP Address`, the
 ssh mobile@192.168.1.23
 ```
 
-Run one installer command. Replace `192.168.1.23` and `change-me`.
+Run the command for your coding agent. Replace `192.168.1.23` and `change-me`.
+
+### Codex
 
 ```powershell
 npx -p github:xtofuub/ios-files-mcp iosfiles-mcp --client codex --host 192.168.1.23 --password change-me
 ```
 
-Use a different client with `--client`:
+Writes to `~/.codex/config.toml`.
+
+### Claude Desktop
+
+```powershell
+npx -p github:xtofuub/ios-files-mcp iosfiles-mcp --client claude --host 192.168.1.23 --password change-me
+```
+
+Writes to Claude Desktop's MCP config.
+
+### OpenCode
+
+```powershell
+npx -p github:xtofuub/ios-files-mcp iosfiles-mcp --client opencode --host 192.168.1.23 --password change-me
+```
+
+Writes to `~/.config/opencode/opencode.json`.
+
+### VS Code
+
+Run this from the workspace folder where you want the MCP server enabled.
+
+```powershell
+npx -p github:xtofuub/ios-files-mcp iosfiles-mcp --client vscode --host 192.168.1.23 --password change-me
+```
+
+Writes to `.vscode/mcp.json`.
+
+### All Supported Clients
+
+```powershell
+npx -p github:xtofuub/ios-files-mcp iosfiles-mcp --client all --host 192.168.1.23 --password change-me
+```
+
+Supported `--client` values:
 
 ```text
 codex      -> ~/.codex/config.toml
@@ -34,15 +70,6 @@ claude     -> Claude Desktop config
 opencode   -> ~/.config/opencode/opencode.json
 vscode     -> .vscode/mcp.json in the current folder
 all        -> all supported clients
-```
-
-Examples:
-
-```powershell
-npx -p github:xtofuub/ios-files-mcp iosfiles-mcp --client claude --host 192.168.1.23 --password change-me
-npx -p github:xtofuub/ios-files-mcp iosfiles-mcp --client opencode --host 192.168.1.23 --password change-me
-npx -p github:xtofuub/ios-files-mcp iosfiles-mcp --client vscode --host 192.168.1.23 --password change-me
-npx -p github:xtofuub/ios-files-mcp iosfiles-mcp --client all --host 192.168.1.23 --password change-me
 ```
 
 The installer writes an `ios-files` MCP server entry and backs up existing config files to `.bak`.
