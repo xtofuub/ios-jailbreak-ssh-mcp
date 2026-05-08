@@ -5,6 +5,9 @@ Use this guide when the user asks to inspect files for an App Store app on their
 ## Core Rules
 
 - Use MCP tools only inside the configured allowed roots.
+- If connection, empty roots, or local setup looks wrong, run `ios_connection_doctor()` first.
+- Use `ios_mcp_config_status()` when the MCP package/config install might be wrong.
+- Use `ios_snapshot_app(bundleId)` for a first structured pass on a known app bundle id.
 - Prefer `ios_resolve_app_container(bundleId)` when the bundle id is known, or `ios_find_app(query)` / `ios_list_apps(query)` for app discovery. Do not use recursive `ios_search_files` to find an app bundle unless the app tools fail.
 - If expected app directories appear empty, run `ios_diagnose_roots()` before trying broader searches.
 - Do not repeat the same `ios_search_files` call. If a search is needed, start with small limits like `maxResults=10` and `maxDepth=2`.

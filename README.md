@@ -243,7 +243,14 @@ For local MCP testing without NPX, point your MCP client at `node dist/index.js`
 If app directories look empty, start here:
 
 ```text
+ios_connection_doctor()
 ios_diagnose_roots()
+```
+
+Check local MCP client config:
+
+```text
+ios_mcp_config_status()
 ```
 
 To find YouTube:
@@ -251,6 +258,7 @@ To find YouTube:
 ```text
 ios_find_app("YouTube")
 ios_find_app("com.google.ios.youtube")
+ios_snapshot_app("com.google.ios.youtube")
 ```
 
 To inspect an app plist:
@@ -420,6 +428,9 @@ Write-capable tools also accept optional `approvalId`. If `requireWriteApproval=
 
 | Tool | What it does |
 | --- | --- |
+| `ios_connection_doctor()` | Checks SSH/SFTP connection, visible roots, local artifact roots, MCP config, and Hermes decoder availability. |
+| `ios_mcp_config_status()` | Shows whether Codex, Claude, OpenCode, and VS Code config files contain the expected `ios-files` server entry. |
+| `ios_snapshot_app(bundleId)` | Builds a metadata-focused app snapshot: bundle/data/app-group paths, Info.plist summary, preference files, SQLite files, and JS bundles. |
 | `ios_diagnose_roots()` | Checks whether common iOS app roots are visible over the current SSH/SFTP login and gives notes for empty directories. |
 
 ## Notes

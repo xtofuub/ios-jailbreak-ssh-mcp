@@ -25,6 +25,36 @@ export function createMcpServer(
   registerTool(
     server,
     logger,
+    "ios_connection_doctor",
+    "Run a full setup doctor for SSH/SFTP connectivity, visible roots, local artifact roots, MCP config, and Hermes decoder availability.",
+    {},
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    async () => service.connectionDoctor()
+  );
+
+  registerTool(
+    server,
+    logger,
+    "ios_mcp_config_status",
+    "Inspect local MCP client config files and show whether ios-files is configured for Codex, Claude, OpenCode, and VS Code.",
+    {},
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    async () => service.mcpConfigStatus()
+  );
+
+  registerTool(
+    server,
+    logger,
+    "ios_snapshot_app",
+    "Create a metadata-focused app snapshot by bundle id: bundle/data/app-group paths, Info.plist summary, preferences list, SQLite files, and JS bundles.",
+    { bundleId: z.string() },
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    (args) => service.snapshotApp(args.bundleId)
+  );
+
+  registerTool(
+    server,
+    logger,
     "ios_list_dir",
     "List entries in a safe allowed iOS directory.",
     { path: z.string() },

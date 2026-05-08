@@ -205,6 +205,91 @@ type DiagnoseRootsResult = {
     roots: RootDiagnostic[];
     notes: string[];
 };
+type LocalPathStatus = {
+    path: string;
+    exists: boolean;
+    type?: "file" | "directory" | "other";
+    error?: string;
+};
+type McpConfigFileStatus = {
+    client: "codex" | "claude" | "opencode" | "vscode";
+    path: string;
+    exists: boolean;
+    configured: boolean;
+    expectedShape: string;
+    notes: string[];
+    error?: string;
+};
+type McpConfigStatusResult = {
+    packageSpec: string;
+    serverName: string;
+    serverCommand: string;
+    process: {
+        cwd: string;
+        argv: string[];
+        node: string;
+        platform: NodeJS.Platform;
+    };
+    runtimeConfig: {
+        host: string;
+        port: number;
+        username: string;
+        authMethod: "password" | "privateKey" | "none";
+        readOnly: boolean;
+        allowWrites: boolean;
+        requireWriteApproval: boolean;
+        allowedRoots: string[];
+        localArtifactRoots: string[];
+        logPath: string;
+    };
+    env: Record<string, {
+        present: boolean;
+        value?: string;
+    }>;
+    commandAvailability: {
+        npx: boolean;
+    };
+    configFiles: McpConfigFileStatus[];
+    notes: string[];
+};
+type ConnectionDoctorResult = {
+    ok: boolean;
+    connection: {
+        ok: boolean;
+        host: string;
+        port: number;
+        username: string;
+        authMethod: "password" | "privateKey" | "none";
+        error?: string;
+    };
+    runtimeConfig: McpConfigStatusResult["runtimeConfig"];
+    localArtifactRoots: LocalPathStatus[];
+    roots?: DiagnoseRootsResult;
+    hermesDecoders?: Awaited<ReturnType<SftpFileService["listHermesDecoders"]>>;
+    mcpConfig: McpConfigStatusResult;
+    nextSteps: string[];
+};
+type AppSnapshotResult = {
+    bundleId: string;
+    resolved: ResolveAppContainerResult;
+    infoPlist?: {
+        path: string;
+        format: "binary" | "xml";
+        summary: Record<string, unknown>;
+    };
+    directories: {
+        bundleTopLevel: FileEntry[];
+        dataTopLevel: FileEntry[];
+        appGroupTopLevel: Array<{
+            path: string;
+            entries: FileEntry[];
+        }>;
+    };
+    preferences: ListPreferencesResult;
+    sqliteFiles: SearchResult[];
+    jsBundleFiles: SearchResult[];
+    notes: string[];
+};
 export declare class SftpNotConnectedError extends Error {
     constructor(message?: string);
 }
@@ -269,9 +354,12 @@ export declare class SftpFileService {
         decoders: HermesDecoderInfo[];
         notes: string[];
     }>;
+    mcpConfigStatus(): Promise<McpConfigStatusResult>;
+    connectionDoctor(): Promise<ConnectionDoctorResult>;
     findApp(query: string): Promise<FindAppResult>;
     listApps(query?: string, limit?: number): Promise<ListAppsResult>;
     resolveAppContainer(bundleId: string): Promise<ResolveAppContainerResult>;
+    snapshotApp(bundleId: string): Promise<AppSnapshotResult>;
     existsPath(path: string): Promise<ExistsResult>;
     readFileChunk(path: string, offset?: number, length?: number, encoding?: "utf8" | "base64"): Promise<FileChunkResult>;
     tailFile(path: string, maxBytes?: number): Promise<FileChunkResult>;
@@ -288,6 +376,18 @@ export declare class SftpFileService {
         hash: string;
         size: number;
     }>;
+    private runtimeConfigSummary;
+    private authMethod;
+    private envPresenceSummary;
+    private mcpConfigPaths;
+    private inspectMcpConfigFile;
+    private jsonMcpServerConfigured;
+    private localPathStatus;
+    private safeListTopLevel;
+    private snapshotSearchFiles;
+    private infoPlistSummary;
+    private stripJsonComments;
+    private redactCliArg;
     private connectedClient;
     private connect;
     private resolveAllowedRoots;
@@ -343,6 +443,7 @@ export declare class SftpFileService {
     private searchNotes;
     private matcherFromPattern;
     private mapEntryType;
+    private fileEntryFromClientInfo;
     private mapStatsType;
     private bufferFromGetResult;
     private dateFromMillis;

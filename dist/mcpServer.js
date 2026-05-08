@@ -8,6 +8,9 @@ export function createMcpServer(service, logger, config) {
         version: "0.1.0"
     });
     const writeApprovals = new WriteApprovalManager(config);
+    registerTool(server, logger, "ios_connection_doctor", "Run a full setup doctor for SSH/SFTP connectivity, visible roots, local artifact roots, MCP config, and Hermes decoder availability.", {}, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }, async () => service.connectionDoctor());
+    registerTool(server, logger, "ios_mcp_config_status", "Inspect local MCP client config files and show whether ios-files is configured for Codex, Claude, OpenCode, and VS Code.", {}, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }, async () => service.mcpConfigStatus());
+    registerTool(server, logger, "ios_snapshot_app", "Create a metadata-focused app snapshot by bundle id: bundle/data/app-group paths, Info.plist summary, preferences list, SQLite files, and JS bundles.", { bundleId: z.string() }, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }, (args) => service.snapshotApp(args.bundleId));
     registerTool(server, logger, "ios_list_dir", "List entries in a safe allowed iOS directory.", { path: z.string() }, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }, (args) => service.listDir(args.path));
     registerTool(server, logger, "ios_read_file", "Read a UTF-8 file from a safe allowed iOS path, subject to maxReadSize.", { path: z.string() }, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }, (args) => service.readFile(args.path));
     registerTool(server, logger, "ios_read_file_chunk", "Read a bounded chunk from a safe allowed iOS file. Use for large files instead of repeated full reads.", {

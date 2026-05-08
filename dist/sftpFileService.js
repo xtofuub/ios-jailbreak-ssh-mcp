@@ -1,6 +1,6 @@
 import { createWriteStream, existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rm, stat as localStat, writeFile as writeLocalFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname as localDirname, join as joinLocal, relative, resolve as resolveLocal } from "node:path";
 import { spawn } from "node:child_process";
 import archiver from "archiver";
@@ -8,6 +8,8 @@ import beautify from "js-beautify";
 import { parse as parseXmlPlist, parseBinary as parseBinaryPlist } from "plist";
 import Client from "ssh2-sftp-client";
 import { assertSafePath, assertWritable, backupPathFor, basename, dirname, joinRemote, normalizeRemotePath } from "./pathSafety.js";
+const PACKAGE_SPEC = "github:xtofuub/ios-files-mcp";
+const MCP_SERVER_NAME = "ios-files";
 const SEARCH_ABSOLUTE_MAX_RESULTS = 500;
 const SEARCH_ABSOLUTE_MAX_DEPTH = 25;
 const APP_CONTAINER_SCAN_LIMIT = 1_000;
@@ -97,16 +99,7 @@ export class SftpFileService {
         const client = await this.connectedClient();
         const safePath = await this.resolveExistingSafePath(client, lexicalPath);
         const entries = await client.list(safePath);
-        return entries.map((entry) => ({
-            name: entry.name,
-            type: this.mapEntryType(entry.type),
-            size: Number(entry.size ?? 0),
-            modifyTime: this.dateFromMillis(entry.modifyTime),
-            accessTime: this.dateFromMillis(entry.accessTime),
-            rights: entry.rights,
-            owner: entry.owner,
-            group: entry.group
-        }));
+        return entries.map((entry) => this.fileEntryFromClientInfo(entry));
     }
     async readFile(path) {
         const lexicalPath = assertSafePath(path, this.config);
@@ -439,6 +432,84 @@ export class SftpFileService {
             notes
         };
     }
+    async mcpConfigStatus() {
+        const configFiles = await Promise.all(this.mcpConfigPaths().map((config) => this.inspectMcpConfigFile(config)));
+        const notes = [];
+        const configuredClients = configFiles.filter((config) => config.configured).map((config) => config.client);
+        if (configuredClients.length === 0) {
+            notes.push("No supported MCP client config currently contains an ios-files entry.");
+        }
+        else {
+            notes.push(`Configured clients: ${configuredClients.join(", ")}.`);
+        }
+        if (!this.config.password && !this.config.privateKeyPath) {
+            notes.push("No SSH credential is configured. Set IOS_FILES_MCP_PASSWORD or IOS_FILES_MCP_KEY_PATH.");
+        }
+        return {
+            packageSpec: PACKAGE_SPEC,
+            serverName: MCP_SERVER_NAME,
+            serverCommand: "npx --yes --quiet github:xtofuub/ios-files-mcp",
+            process: {
+                cwd: process.cwd(),
+                argv: process.argv.map((arg) => this.redactCliArg(arg)),
+                node: process.version,
+                platform: process.platform
+            },
+            runtimeConfig: this.runtimeConfigSummary(),
+            env: this.envPresenceSummary(),
+            commandAvailability: {
+                npx: await this.commandExists("npx")
+            },
+            configFiles,
+            notes
+        };
+    }
+    async connectionDoctor() {
+        const mcpConfig = await this.mcpConfigStatus();
+        const localArtifactRoots = await Promise.all(this.config.localArtifactRoots.map((path) => this.localPathStatus(path)));
+        const connection = {
+            ok: false,
+            host: this.config.host,
+            port: this.config.port,
+            username: this.config.username,
+            authMethod: this.authMethod()
+        };
+        const nextSteps = [];
+        let roots;
+        try {
+            await this.connectedClient();
+            connection.ok = true;
+            roots = await this.diagnoseRoots();
+        }
+        catch (error) {
+            connection.error = error instanceof Error ? error.message : String(error);
+            nextSteps.push("Fix SSH/SFTP connectivity first: verify host, port, username, credential, and that OpenSSH is reachable.");
+        }
+        const hermesDecoders = await this.listHermesDecoders();
+        if (!mcpConfig.commandAvailability.npx) {
+            nextSteps.push("Install Node.js/npm or make sure npx is available on PATH for the MCP client.");
+        }
+        const missingLocalRoots = localArtifactRoots.filter((root) => !root.exists);
+        if (missingLocalRoots.length > 0) {
+            nextSteps.push(`Create or change localArtifactRoots that do not exist: ${missingLocalRoots.map((root) => root.path).join(", ")}.`);
+        }
+        if (roots && roots.roots.every((root) => !root.exists || (root.entryCount ?? 0) === 0)) {
+            nextSteps.push("Expected app roots were empty or unavailable. Try a different SSH username if your device restricts app paths.");
+        }
+        if (nextSteps.length === 0) {
+            nextSteps.push("Connection and local setup look usable. Try ios_find_app(bundle id or app name) next.");
+        }
+        return {
+            ok: connection.ok && nextSteps.length === 1 && nextSteps[0].startsWith("Connection and local setup"),
+            connection,
+            runtimeConfig: mcpConfig.runtimeConfig,
+            localArtifactRoots,
+            roots,
+            hermesDecoders,
+            mcpConfig,
+            nextSteps
+        };
+    }
     async findApp(query) {
         const normalizedQuery = query.trim();
         if (!normalizedQuery) {
@@ -562,6 +633,68 @@ export class SftpFileService {
             primaryBundle,
             primaryDataContainer,
             primaryAppGroup
+        };
+    }
+    async snapshotApp(bundleId) {
+        const resolved = await this.resolveAppContainer(bundleId);
+        const client = await this.connectedClient();
+        const notes = [...resolved.notes];
+        const bundlePath = resolved.primaryBundle?.path;
+        const dataPath = resolved.primaryDataContainer?.path;
+        const appGroupPaths = resolved.appGroupMatches.map((match) => match.path);
+        let infoPlist;
+        if (resolved.primaryBundle) {
+            try {
+                const parsed = await this.readPlistAt(client, resolved.primaryBundle.infoPlistPath, this.config.maxReadSize);
+                infoPlist = {
+                    path: resolved.primaryBundle.infoPlistPath,
+                    format: parsed.format,
+                    summary: this.infoPlistSummary(parsed.value)
+                };
+            }
+            catch (error) {
+                notes.push(`Could not read Info.plist: ${error instanceof Error ? error.message : String(error)}`);
+            }
+        }
+        else {
+            notes.push("No primary app bundle was found for this bundle id.");
+        }
+        const [bundleTopLevel, dataTopLevel, preferences, sqliteFiles, jsBundleFiles] = await Promise.all([
+            bundlePath ? this.safeListTopLevel(client, bundlePath, notes) : Promise.resolve([]),
+            dataPath ? this.safeListTopLevel(client, dataPath, notes) : Promise.resolve([]),
+            this.listPreferences(bundleId).catch((error) => ({
+                bundleId,
+                preferenceDirectories: [],
+                preferenceFiles: [],
+                notes: [`Could not list preferences: ${error instanceof Error ? error.message : String(error)}`]
+            })),
+            this.snapshotSearchFiles([dataPath, ...appGroupPaths].filter((path) => Boolean(path)), "/\\.(sqlite|sqlite3|db)$/"),
+            this.snapshotSearchFiles([bundlePath, dataPath, ...appGroupPaths].filter((path) => Boolean(path)), "/\\.(jsbundle|bundle|hbc)$/")
+        ]);
+        const appGroupTopLevel = [];
+        for (const path of appGroupPaths.slice(0, 10)) {
+            appGroupTopLevel.push({
+                path,
+                entries: await this.safeListTopLevel(client, path, notes)
+            });
+        }
+        notes.push("Snapshot is metadata-focused. It lists likely files but does not read preference values or database rows.");
+        return {
+            bundleId,
+            resolved,
+            infoPlist,
+            directories: {
+                bundleTopLevel,
+                dataTopLevel,
+                appGroupTopLevel
+            },
+            preferences: {
+                ...preferences,
+                notes: preferences.notes
+            },
+            sqliteFiles,
+            jsBundleFiles,
+            notes: this.uniqueStrings(notes)
         };
     }
     async existsPath(path) {
@@ -863,6 +996,224 @@ export class SftpFileService {
             hash,
             size
         };
+    }
+    runtimeConfigSummary() {
+        return {
+            host: this.config.host,
+            port: this.config.port,
+            username: this.config.username,
+            authMethod: this.authMethod(),
+            readOnly: this.config.readOnly,
+            allowWrites: this.config.allowWrites,
+            requireWriteApproval: this.config.requireWriteApproval,
+            allowedRoots: this.config.allowedRoots,
+            localArtifactRoots: this.config.localArtifactRoots,
+            logPath: this.config.logPath
+        };
+    }
+    authMethod() {
+        if (this.config.privateKeyPath) {
+            return "privateKey";
+        }
+        if (this.config.password) {
+            return "password";
+        }
+        return "none";
+    }
+    envPresenceSummary() {
+        const envNames = [
+            "IOS_FILES_MCP_HOST",
+            "IOS_FILES_MCP_PORT",
+            "IOS_FILES_MCP_USERNAME",
+            "IOS_FILES_MCP_PASSWORD",
+            "IOS_FILES_MCP_KEY_PATH",
+            "IOS_FILES_MCP_ALLOWED_ROOTS",
+            "IOS_FILES_MCP_LOCAL_ARTIFACT_ROOTS",
+            "IOS_FILES_MCP_READ_ONLY",
+            "IOS_FILES_MCP_ALLOW_WRITES",
+            "IOS_FILES_MCP_REQUIRE_WRITE_APPROVAL",
+            "IOS_FILES_MCP_CONFIG"
+        ];
+        return Object.fromEntries(envNames.map((name) => {
+            const value = process.env[name];
+            const safeValue = value && !/(PASSWORD|PASSPHRASE|KEY)/.test(name) ? value : undefined;
+            return [name, { present: value !== undefined, value: safeValue }];
+        }));
+    }
+    mcpConfigPaths() {
+        const appData = process.env.APPDATA ?? joinLocal(homedir(), "AppData", "Roaming");
+        const claudePath = process.platform === "win32"
+            ? joinLocal(appData, "Claude", "claude_desktop_config.json")
+            : process.platform === "darwin"
+                ? joinLocal(homedir(), "Library", "Application Support", "Claude", "claude_desktop_config.json")
+                : joinLocal(homedir(), ".config", "Claude", "claude_desktop_config.json");
+        return [
+            {
+                client: "codex",
+                path: joinLocal(homedir(), ".codex", "config.toml"),
+                expectedShape: `[mcp_servers.${MCP_SERVER_NAME}]`
+            },
+            {
+                client: "claude",
+                path: claudePath,
+                expectedShape: `mcpServers.${MCP_SERVER_NAME}`
+            },
+            {
+                client: "opencode",
+                path: process.env.OPENCODE_CONFIG ? resolveLocal(process.env.OPENCODE_CONFIG) : joinLocal(homedir(), ".config", "opencode", "opencode.json"),
+                expectedShape: `mcp.${MCP_SERVER_NAME}`
+            },
+            {
+                client: "vscode",
+                path: resolveLocal(process.cwd(), ".vscode", "mcp.json"),
+                expectedShape: `servers.${MCP_SERVER_NAME}`
+            }
+        ];
+    }
+    async inspectMcpConfigFile(config) {
+        const notes = [];
+        try {
+            await localStat(config.path);
+        }
+        catch (error) {
+            return {
+                ...config,
+                exists: false,
+                configured: false,
+                notes: ["Config file does not exist."]
+            };
+        }
+        try {
+            const content = await readFile(config.path, "utf8");
+            let configured = false;
+            if (config.client === "codex") {
+                configured =
+                    content.includes(`[mcp_servers.${MCP_SERVER_NAME}]`) &&
+                        content.includes(PACKAGE_SPEC);
+            }
+            else {
+                const parsed = JSON.parse(this.stripJsonComments(content));
+                configured = this.jsonMcpServerConfigured(parsed, config.client);
+            }
+            if (!configured) {
+                notes.push("ios-files entry was not found or does not point at the expected GitHub package.");
+            }
+            return {
+                ...config,
+                exists: true,
+                configured,
+                notes
+            };
+        }
+        catch (error) {
+            return {
+                ...config,
+                exists: true,
+                configured: false,
+                notes,
+                error: error instanceof Error ? error.message : String(error)
+            };
+        }
+    }
+    jsonMcpServerConfigured(input, client) {
+        if (!input || typeof input !== "object" || Array.isArray(input)) {
+            return false;
+        }
+        const root = input;
+        const containerName = client === "opencode" ? "mcp" : client === "vscode" ? "servers" : "mcpServers";
+        const container = root[containerName];
+        if (!container || typeof container !== "object" || Array.isArray(container)) {
+            return false;
+        }
+        const server = container[MCP_SERVER_NAME];
+        if (!server || typeof server !== "object" || Array.isArray(server)) {
+            return false;
+        }
+        return JSON.stringify(server).includes(PACKAGE_SPEC);
+    }
+    async localPathStatus(path) {
+        try {
+            const stats = await localStat(path);
+            return {
+                path,
+                exists: true,
+                type: stats.isDirectory() ? "directory" : stats.isFile() ? "file" : "other"
+            };
+        }
+        catch (error) {
+            return {
+                path,
+                exists: false,
+                error: error instanceof Error ? error.message : String(error)
+            };
+        }
+    }
+    async safeListTopLevel(client, path, notes, limit = 75) {
+        try {
+            const safePath = await this.resolveExistingSafePath(client, path);
+            const entries = await client.list(safePath);
+            return entries.slice(0, limit).map((entry) => this.fileEntryFromClientInfo(entry));
+        }
+        catch (error) {
+            notes.push(`Could not list ${path}: ${error instanceof Error ? error.message : String(error)}`);
+            return [];
+        }
+    }
+    async snapshotSearchFiles(roots, pattern) {
+        const results = [];
+        const seenPaths = new Set();
+        for (const root of roots.slice(0, 12)) {
+            try {
+                const search = await this.searchFiles(root, pattern, {
+                    maxResults: 25,
+                    maxDepth: 4,
+                    includeMetadata: true,
+                    useCache: true
+                });
+                for (const result of search.results) {
+                    if (!seenPaths.has(result.path)) {
+                        seenPaths.add(result.path);
+                        results.push(result);
+                    }
+                }
+            }
+            catch {
+                // Snapshot search should be best-effort.
+            }
+        }
+        return results.slice(0, 50);
+    }
+    infoPlistSummary(value) {
+        const record = value && typeof value === "object" && !Array.isArray(value)
+            ? value
+            : {};
+        const keys = [
+            "CFBundleIdentifier",
+            "CFBundleDisplayName",
+            "CFBundleName",
+            "CFBundleExecutable",
+            "CFBundleShortVersionString",
+            "CFBundleVersion",
+            "MinimumOSVersion",
+            "UIDeviceFamily",
+            "UIRequiredDeviceCapabilities",
+            "DTPlatformName"
+        ];
+        return Object.fromEntries(keys
+            .filter((key) => record[key] !== undefined)
+            .map((key) => [key, this.toJsonSafe(record[key])]));
+    }
+    stripJsonComments(input) {
+        return input
+            .replace(/^\uFEFF/, "")
+            .replace(/\/\*[\s\S]*?\*\//g, "")
+            .replace(/(^|[^:])\/\/.*$/gm, "$1");
+    }
+    redactCliArg(arg) {
+        if (/password|passphrase|token|secret/i.test(arg)) {
+            return "<redacted>";
+        }
+        return arg;
     }
     async connectedClient() {
         if (this.client) {
@@ -1723,6 +2074,18 @@ export class SftpFileService {
             return "symlink";
         }
         return "other";
+    }
+    fileEntryFromClientInfo(entry) {
+        return {
+            name: entry.name,
+            type: this.mapEntryType(entry.type),
+            size: Number(entry.size ?? 0),
+            modifyTime: this.dateFromMillis(entry.modifyTime),
+            accessTime: this.dateFromMillis(entry.accessTime),
+            rights: entry.rights,
+            owner: entry.owner,
+            group: entry.group
+        };
     }
     mapStatsType(stat) {
         if (stat.isDirectory) {
