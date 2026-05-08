@@ -6,7 +6,9 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { assertAllowedRootConfig, DEFAULT_ALLOWED_ROOTS } from "./pathSafety.js";
 const FOUR_MIB = 4 * 1024 * 1024;
+const SIXTEEN_MIB = 16 * 1024 * 1024;
 const SIXTY_FOUR_MIB = 64 * 1024 * 1024;
+const ONE_TWENTY_EIGHT_MIB = 128 * 1024 * 1024;
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
 const TWO_MINUTES_MS = 2 * 60 * 1000;
 const rawConfigSchema = z
@@ -24,6 +26,17 @@ const rawConfigSchema = z
     maxReadSize: z.coerce.number().int().positive().optional(),
     jsBundleMaxReadSize: z.coerce.number().int().positive().optional(),
     sqliteMaxReadSize: z.coerce.number().int().positive().optional(),
+    r2: z
+        .object({
+        enabled: z.boolean().optional(),
+        r2Path: z.string().min(1).optional(),
+        rabin2Path: z.string().min(1).optional(),
+        timeoutMs: z.coerce.number().int().positive().optional(),
+        maxOutputBytes: z.coerce.number().int().positive().optional(),
+        maxBinarySize: z.coerce.number().int().positive().optional()
+    })
+        .strict()
+        .optional(),
     hermesDecoderPreset: z
         .enum(["auto", "hermesc", "hbc-decompiler", "hbc-disassembler", "hbctool", "jsc2llvm", "custom"])
         .optional(),
@@ -87,6 +100,7 @@ export function helpText() {
         "",
         "Safety:",
         "  The server is read-only by default. Writes require IOS_FILES_MCP_READ_ONLY=false and IOS_FILES_MCP_ALLOW_WRITES=true.",
+        "  Optional static binary analysis requires local radare2 and IOS_FILES_MCP_ENABLE_R2=true.",
         "",
         "JSON config files are still supported with --config or IOS_FILES_MCP_CONFIG, but MCP env config is the recommended setup."
     ].join("\n");
@@ -175,6 +189,14 @@ function envConfig() {
         ?.split(",")
         .map((root) => root.trim())
         .filter(Boolean);
+    const r2Config = pruneUndefined({
+        enabled: readBooleanEnv("IOS_FILES_MCP_ENABLE_R2"),
+        r2Path: process.env.IOS_FILES_MCP_R2_PATH,
+        rabin2Path: process.env.IOS_FILES_MCP_RABIN2_PATH,
+        timeoutMs: readNumberEnv("IOS_FILES_MCP_R2_TIMEOUT_MS"),
+        maxOutputBytes: readNumberEnv("IOS_FILES_MCP_R2_MAX_OUTPUT_BYTES"),
+        maxBinarySize: readNumberEnv("IOS_FILES_MCP_R2_MAX_BINARY_SIZE")
+    });
     return {
         host: process.env.IOS_FILES_MCP_HOST,
         port: readNumberEnv("IOS_FILES_MCP_PORT"),
@@ -189,6 +211,7 @@ function envConfig() {
         maxReadSize: readNumberEnv("IOS_FILES_MCP_MAX_READ_SIZE"),
         jsBundleMaxReadSize: readNumberEnv("IOS_FILES_MCP_JS_BUNDLE_MAX_READ_SIZE"),
         sqliteMaxReadSize: readNumberEnv("IOS_FILES_MCP_SQLITE_MAX_READ_SIZE"),
+        r2: Object.keys(r2Config).length > 0 ? r2Config : undefined,
         hermesDecoderPreset: readHermesDecoderPresetEnv(),
         hermesDecoderCommand: process.env.IOS_FILES_MCP_HERMES_DECODER_COMMAND,
         hermesDecoderOutputLimit: readNumberEnv("IOS_FILES_MCP_HERMES_DECODER_OUTPUT_LIMIT"),
@@ -225,9 +248,14 @@ export async function loadConfig() {
     const loadedConfig = await loadJsonConfig(configPath);
     const fileConfig = loadedConfig.data;
     const envOverrides = pruneUndefined(envConfig());
+    const mergedR2 = {
+        ...(fileConfig.r2 ?? {}),
+        ...(envOverrides.r2 ?? {})
+    };
     const merged = {
         ...fileConfig,
-        ...envOverrides
+        ...envOverrides,
+        r2: Object.keys(mergedR2).length > 0 ? mergedR2 : undefined
     };
     const host = merged.host;
     if (!host) {
@@ -272,6 +300,14 @@ export async function loadConfig() {
         maxReadSize: merged.maxReadSize ?? FOUR_MIB,
         jsBundleMaxReadSize: merged.jsBundleMaxReadSize ?? SIXTY_FOUR_MIB,
         sqliteMaxReadSize: merged.sqliteMaxReadSize ?? SIXTY_FOUR_MIB,
+        r2: {
+            enabled: merged.r2?.enabled ?? false,
+            r2Path: merged.r2?.r2Path ?? "r2",
+            rabin2Path: merged.r2?.rabin2Path ?? "rabin2",
+            timeoutMs: merged.r2?.timeoutMs ?? 30_000,
+            maxOutputBytes: merged.r2?.maxOutputBytes ?? SIXTEEN_MIB,
+            maxBinarySize: merged.r2?.maxBinarySize ?? ONE_TWENTY_EIGHT_MIB
+        },
         hermesDecoderPreset: merged.hermesDecoderPreset ?? "auto",
         hermesDecoderCommand: merged.hermesDecoderCommand ?? undefined,
         hermesDecoderOutputLimit: merged.hermesDecoderOutputLimit ?? FOUR_MIB,

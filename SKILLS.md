@@ -22,6 +22,17 @@ Use this guide when the user asks to inspect files for an App Store app on their
 - Do not request broader roots for `/var/Keychains`, `/private/var/db`, `/System`, `/usr`, `/bin`, or `/sbin`.
 - Use `ios_read_plist(path)` for `Info.plist` and container metadata plists. Avoid dumping binary plist bytes with `ios_read_file`.
 
+## Static Binary Analysis
+
+- Use radare2 tools when the user asks to analyze an iOS app binary, find strings/imports/functions, look for API endpoints, check crypto/keychain/networking usage, triage an installed app, show interesting functions, or disassemble one function.
+- Use `ios_r2_app_triage(bundleId)` first when the user gives a bundle id or asks to analyze an installed app.
+- Use `ios_r2_binary_info(remotePath)` when the user gives a direct Mach-O binary path.
+- Use `ios_r2_strings(remotePath, query, limit)` for URLs, endpoints, Firebase config, tokens, auth text, debug strings, and feature flags.
+- Use `ios_r2_imports(remotePath, query, limit)` for Security/Keychain, CommonCrypto, CryptoKit, networking, SQLite, WebKit, device integrity, and anti-debug APIs.
+- Use `ios_r2_functions(remotePath, limit)` before disassembly. Use `ios_r2_function_disasm(remotePath, functionNameOrAddress)` only after selecting a specific function or address.
+- If symbols look stripped, explain that strings/imports matter more. If the binary appears encrypted, explain that static analysis may be limited and an authorized decrypted or test build may be needed.
+- If the user asks for runtime behavior, say Frida/runtime instrumentation is not implemented in this MCP module yet.
+
 ## Important iOS App Locations
 
 Do not assume every app-related directory starts under `/var/mobile`.

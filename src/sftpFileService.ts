@@ -24,6 +24,7 @@ import {
   joinRemote,
   normalizeRemotePath
 } from "./pathSafety.js";
+import { RadareService, type R2CheckResult } from "./radareService.js";
 import type { ServerConfig } from "./types.js";
 
 type FileEntry = {
@@ -307,6 +308,14 @@ type McpConfigStatusResult = {
     allowedRoots: string[];
     localArtifactRoots: string[];
     logPath: string;
+    r2: {
+      enabled: boolean;
+      r2Path: string;
+      rabin2Path: string;
+      timeoutMs: number;
+      maxOutputBytes: number;
+      maxBinarySize: number;
+    };
   };
   env: Record<string, { present: boolean; value?: string }>;
   commandAvailability: {
@@ -330,6 +339,7 @@ type ConnectionDoctorResult = {
   localArtifactRoots: LocalPathStatus[];
   roots?: DiagnoseRootsResult;
   hermesDecoders?: Awaited<ReturnType<SftpFileService["listHermesDecoders"]>>;
+  radare2?: R2CheckResult;
   mcpConfig: McpConfigStatusResult;
   nextSteps: string[];
 };
@@ -351,6 +361,12 @@ type AppSnapshotResult = {
   sqliteFiles: SearchResult[];
   jsBundleFiles: SearchResult[];
   notes: string[];
+};
+
+type R2DownloadedBinary = {
+  remotePath: string;
+  localPath: string;
+  size: number;
 };
 
 const PACKAGE_SPEC = "github:xtofuub/ios-files-mcp";
@@ -436,8 +452,11 @@ export class SftpFileService {
   private canonicalAllowedRoots: string[] = [];
   private readonly searchCache = new Map<string, SearchCacheEntry>();
   private readonly appFindCache = new Map<string, TimedCacheEntry<FindAppResult>>();
+  private readonly radare: RadareService;
 
-  constructor(private readonly config: ServerConfig) {}
+  constructor(private readonly config: ServerConfig) {
+    this.radare = new RadareService(config.r2);
+  }
 
   async close(): Promise<void> {
     if (this.client) {
@@ -947,10 +966,17 @@ export class SftpFileService {
       nextSteps.push("Fix SSH/SFTP connectivity first: verify host, port, username, credential, and that OpenSSH is reachable.");
     }
 
-    const hermesDecoders = await this.listHermesDecoders();
+    const [hermesDecoders, radare2] = await Promise.all([
+      this.listHermesDecoders(),
+      this.r2Check()
+    ]);
 
     if (!mcpConfig.commandAvailability.npx) {
       nextSteps.push("Install Node.js/npm or make sure npx is available on PATH for the MCP client.");
+    }
+
+    if (radare2.enabled && (!radare2.r2.available || !radare2.rabin2.available)) {
+      nextSteps.push("radare2 is enabled but r2/rabin2 are not available to the MCP process. Install radare2 or set IOS_FILES_MCP_R2_PATH and IOS_FILES_MCP_RABIN2_PATH.");
     }
 
     const missingLocalRoots = localArtifactRoots.filter((root) => !root.exists);
@@ -973,6 +999,7 @@ export class SftpFileService {
       localArtifactRoots,
       roots,
       hermesDecoders,
+      radare2,
       mcpConfig,
       nextSteps
     };
@@ -1571,6 +1598,143 @@ export class SftpFileService {
     };
   }
 
+  async r2Check(): Promise<R2CheckResult> {
+    return this.radare.check();
+  }
+
+  async r2BinaryInfo(remotePath: string): Promise<{
+    remotePath: string;
+    size: number;
+  } & Awaited<ReturnType<RadareService["binaryInfo"]>>> {
+    return this.withTempR2Binary(remotePath, async (binary) => ({
+      remotePath: binary.remotePath,
+      size: binary.size,
+      ...(await this.radare.binaryInfo(binary.localPath))
+    }));
+  }
+
+  async r2AppTriage(bundleId: string): Promise<Awaited<ReturnType<RadareService["appTriage"]>>> {
+    this.assertR2Enabled();
+    const normalizedBundleId = bundleId.trim();
+    if (!normalizedBundleId) {
+      throw new Error("bundleId must be non-empty.");
+    }
+
+    const resolved = await this.resolveAppContainer(normalizedBundleId);
+    const bundle = resolved.primaryBundle;
+    if (!bundle) {
+      throw new Error(`No app bundle was found for bundle id: ${normalizedBundleId}`);
+    }
+
+    const client = await this.connectedClient();
+    const parsed = await this.readPlistAt(client, bundle.infoPlistPath, APP_METADATA_READ_LIMIT);
+    const infoRecord = this.asRecord(parsed.value);
+    const executable = this.stringValue(infoRecord?.CFBundleExecutable) ?? bundle.appName;
+    if (!executable) {
+      throw new Error(`Info.plist did not include CFBundleExecutable for ${normalizedBundleId}.`);
+    }
+
+    if (executable.includes("/") || executable.includes("\\")) {
+      throw new Error("CFBundleExecutable must be a file name, not a path.");
+    }
+
+    const remoteBinaryPath = this.assertCanonicalSafePath(joinRemote(bundle.path, executable));
+    return this.withTempR2Binary(remoteBinaryPath, (binary) =>
+      this.radare.appTriage({
+        bundleId: normalizedBundleId,
+        localPath: binary.localPath,
+        remoteBinaryPath: binary.remotePath
+      })
+    );
+  }
+
+  async r2Strings(remotePath: string, query?: string, limit?: number): Promise<{
+    remotePath: string;
+    size: number;
+  } & Awaited<ReturnType<RadareService["strings"]>>> {
+    return this.withTempR2Binary(remotePath, async (binary) => ({
+      remotePath: binary.remotePath,
+      size: binary.size,
+      ...(await this.radare.strings(binary.localPath, query, limit))
+    }));
+  }
+
+  async r2Imports(remotePath: string, query?: string, limit?: number): Promise<{
+    remotePath: string;
+    size: number;
+  } & Awaited<ReturnType<RadareService["imports"]>>> {
+    return this.withTempR2Binary(remotePath, async (binary) => ({
+      remotePath: binary.remotePath,
+      size: binary.size,
+      ...(await this.radare.imports(binary.localPath, query, limit))
+    }));
+  }
+
+  async r2Functions(remotePath: string, limit?: number): Promise<{
+    remotePath: string;
+    size: number;
+  } & Awaited<ReturnType<RadareService["functions"]>>> {
+    return this.withTempR2Binary(remotePath, async (binary) => ({
+      remotePath: binary.remotePath,
+      size: binary.size,
+      ...(await this.radare.functions(binary.localPath, limit))
+    }));
+  }
+
+  async r2FunctionDisasm(remotePath: string, functionNameOrAddress: string): Promise<{
+    remotePath: string;
+    size: number;
+  } & Awaited<ReturnType<RadareService["functionDisasm"]>>> {
+    return this.withTempR2Binary(remotePath, async (binary) => ({
+      remotePath: binary.remotePath,
+      size: binary.size,
+      ...(await this.radare.functionDisasm(binary.localPath, functionNameOrAddress))
+    }));
+  }
+
+  private async withTempR2Binary<T>(
+    remotePath: string,
+    handler: (binary: R2DownloadedBinary) => Promise<T>
+  ): Promise<T> {
+    this.assertR2Enabled();
+    const lexicalPath = assertSafePath(remotePath, this.config);
+    const client = await this.connectedClient();
+    const safeRemotePath = await this.resolveExistingSafePath(client, lexicalPath);
+    const stat = await client.stat(safeRemotePath);
+    const size = Number(stat.size ?? 0);
+
+    if (this.mapStatsType(stat) !== "file") {
+      throw new Error(`Remote path is not a regular file: ${safeRemotePath}`);
+    }
+
+    if (size > this.config.r2.maxBinarySize) {
+      throw new Error(
+        `Binary is ${size} bytes, which exceeds r2.maxBinarySize=${this.config.r2.maxBinarySize}.`
+      );
+    }
+
+    const tempDir = await mkdtemp(joinLocal(tmpdir(), "ios-files-mcp-r2-"));
+    const safeName = (basename(safeRemotePath) || "binary").replace(/[^A-Za-z0-9._-]/g, "_");
+    const localPath = joinLocal(tempDir, safeName);
+
+    try {
+      await client.get(safeRemotePath, createWriteStream(localPath));
+      return await handler({
+        remotePath: safeRemotePath,
+        localPath,
+        size
+      });
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }
+
+  private assertR2Enabled(): void {
+    if (!this.config.r2.enabled) {
+      throw new Error("radare2 tools are disabled. Set IOS_FILES_MCP_ENABLE_R2=true in the MCP env block.");
+    }
+  }
+
   private runtimeConfigSummary(): McpConfigStatusResult["runtimeConfig"] {
     return {
       host: this.config.host,
@@ -1582,7 +1746,15 @@ export class SftpFileService {
       requireWriteApproval: this.config.requireWriteApproval,
       allowedRoots: this.config.allowedRoots,
       localArtifactRoots: this.config.localArtifactRoots,
-      logPath: this.config.logPath
+      logPath: this.config.logPath,
+      r2: {
+        enabled: this.config.r2.enabled,
+        r2Path: this.config.r2.r2Path,
+        rabin2Path: this.config.r2.rabin2Path,
+        timeoutMs: this.config.r2.timeoutMs,
+        maxOutputBytes: this.config.r2.maxOutputBytes,
+        maxBinarySize: this.config.r2.maxBinarySize
+      }
     };
   }
 
@@ -1608,6 +1780,12 @@ export class SftpFileService {
       "IOS_FILES_MCP_READ_ONLY",
       "IOS_FILES_MCP_ALLOW_WRITES",
       "IOS_FILES_MCP_REQUIRE_WRITE_APPROVAL",
+      "IOS_FILES_MCP_ENABLE_R2",
+      "IOS_FILES_MCP_R2_PATH",
+      "IOS_FILES_MCP_RABIN2_PATH",
+      "IOS_FILES_MCP_R2_TIMEOUT_MS",
+      "IOS_FILES_MCP_R2_MAX_OUTPUT_BYTES",
+      "IOS_FILES_MCP_R2_MAX_BINARY_SIZE",
       "IOS_FILES_MCP_CONFIG"
     ];
 

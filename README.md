@@ -145,6 +145,12 @@ IOS_FILES_MCP_ALLOWED_ROOTS
 IOS_FILES_MCP_READ_ONLY
 IOS_FILES_MCP_ALLOW_WRITES
 IOS_FILES_MCP_REQUIRE_WRITE_APPROVAL
+IOS_FILES_MCP_ENABLE_R2
+IOS_FILES_MCP_R2_PATH
+IOS_FILES_MCP_RABIN2_PATH
+IOS_FILES_MCP_R2_TIMEOUT_MS
+IOS_FILES_MCP_R2_MAX_OUTPUT_BYTES
+IOS_FILES_MCP_R2_MAX_BINARY_SIZE
 IOS_FILES_MCP_CONFIG
 ```
 
@@ -411,6 +417,55 @@ Optional decoder helper:
 npx -p github:xtofuub/ios-files-mcp ios-files-mcp-install-hermes-dec
 npx -p github:xtofuub/ios-files-mcp ios-files-mcp-check-hermes-decoders
 ```
+
+### radare2 static analysis tools
+
+These tools run `radare2` and `rabin2` locally on your computer, not on the iOS device. The MCP copies the selected Mach-O binary from the device into a temporary local folder, analyzes it, then deletes the temporary copy.
+
+Requirements:
+
+- Install radare2 locally so `r2` and `rabin2` are on PATH.
+- Enable the tools in MCP env with `IOS_FILES_MCP_ENABLE_R2=true`.
+- Static analysis only. Frida/runtime instrumentation is intentionally not included in this module.
+
+Optional env:
+
+```text
+IOS_FILES_MCP_ENABLE_R2=true
+IOS_FILES_MCP_R2_PATH=r2
+IOS_FILES_MCP_RABIN2_PATH=rabin2
+IOS_FILES_MCP_R2_TIMEOUT_MS=30000
+IOS_FILES_MCP_R2_MAX_OUTPUT_BYTES=16777216
+IOS_FILES_MCP_R2_MAX_BINARY_SIZE=134217728
+```
+
+When to use:
+
+- Use `ios_r2_app_triage(bundleId)` for the fastest overview of an installed app.
+- Use `ios_r2_binary_info(remotePath)` when you already know the binary path.
+- Use `ios_r2_strings(remotePath, query, limit)` for endpoints, secrets, Firebase, URLs, debug strings, and feature flags.
+- Use `ios_r2_imports(remotePath, query, limit)` for framework/API usage such as Keychain, crypto, networking, SQLite, WebKit, device integrity, and anti-debug checks.
+- Use `ios_r2_functions(remotePath, limit)` to map available functions.
+- Use `ios_r2_function_disasm(remotePath, functionNameOrAddress)` to inspect one selected function or address.
+
+Recommended analysis flow:
+
+1. `ios_find_app("App Name")` or `ios_resolve_app_container("com.example.app")`
+2. `ios_r2_app_triage("com.example.app")`
+3. `ios_r2_strings(remotePath, query, limit)` with queries like `http`, `api`, `firebase`, `token`, `auth`, `key`, `debug`
+4. `ios_r2_imports(remotePath, query, limit)` with queries like `SecItem`, `CommonCrypto`, `CryptoKit`, `NSURLSession`, `SQLite`, `WKWebView`
+5. `ios_r2_functions(remotePath, limit)`
+6. `ios_r2_function_disasm(remotePath, functionNameOrAddress)` on a specific interesting function or address
+
+| Tool | What it does |
+| --- | --- |
+| `ios_r2_check()` | Shows whether r2 support is enabled and whether local `r2`/`rabin2` are available. |
+| `ios_r2_binary_info(remotePath)` | Returns Mach-O metadata and linked libraries for one binary path. |
+| `ios_r2_app_triage(bundleId)` | Resolves an installed app, finds its executable, and returns binary info, interesting imports/strings, functions preview, and next actions. |
+| `ios_r2_strings(remotePath, query, limit)` | Searches binary strings for URLs, endpoints, tokens, Firebase config, debug text, and feature flags. |
+| `ios_r2_imports(remotePath, query, limit)` | Searches imported symbols/framework APIs such as Keychain, crypto, networking, SQLite, WebKit, and anti-debug calls. |
+| `ios_r2_functions(remotePath, limit)` | Lists function names and addresses before deeper inspection. |
+| `ios_r2_function_disasm(remotePath, functionNameOrAddress)` | Returns structured JSON disassembly for one selected function or address. |
 
 ### Writing Files
 

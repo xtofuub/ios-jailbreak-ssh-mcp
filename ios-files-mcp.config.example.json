@@ -23,6 +23,14 @@
   "maxReadSize": 4194304,
   "jsBundleMaxReadSize": 67108864,
   "sqliteMaxReadSize": 67108864,
+  "r2": {
+    "enabled": false,
+    "r2Path": "r2",
+    "rabin2Path": "rabin2",
+    "timeoutMs": 30000,
+    "maxOutputBytes": 16777216,
+    "maxBinarySize": 134217728
+  },
   "hermesDecoderPreset": "auto",
   "hermesDecoderCommand": null,
   "hermesDecoderOutputLimit": 4194304,

@@ -1,3 +1,4 @@
+import { RadareService, type R2CheckResult } from "./radareService.js";
 import type { ServerConfig } from "./types.js";
 type FileEntry = {
     name: string;
@@ -241,6 +242,14 @@ type McpConfigStatusResult = {
         allowedRoots: string[];
         localArtifactRoots: string[];
         logPath: string;
+        r2: {
+            enabled: boolean;
+            r2Path: string;
+            rabin2Path: string;
+            timeoutMs: number;
+            maxOutputBytes: number;
+            maxBinarySize: number;
+        };
     };
     env: Record<string, {
         present: boolean;
@@ -266,6 +275,7 @@ type ConnectionDoctorResult = {
     localArtifactRoots: LocalPathStatus[];
     roots?: DiagnoseRootsResult;
     hermesDecoders?: Awaited<ReturnType<SftpFileService["listHermesDecoders"]>>;
+    radare2?: R2CheckResult;
     mcpConfig: McpConfigStatusResult;
     nextSteps: string[];
 };
@@ -300,6 +310,7 @@ export declare class SftpFileService {
     private canonicalAllowedRoots;
     private readonly searchCache;
     private readonly appFindCache;
+    private readonly radare;
     constructor(config: ServerConfig);
     close(): Promise<void>;
     listDir(path: string): Promise<FileEntry[]>;
@@ -376,6 +387,30 @@ export declare class SftpFileService {
         hash: string;
         size: number;
     }>;
+    r2Check(): Promise<R2CheckResult>;
+    r2BinaryInfo(remotePath: string): Promise<{
+        remotePath: string;
+        size: number;
+    } & Awaited<ReturnType<RadareService["binaryInfo"]>>>;
+    r2AppTriage(bundleId: string): Promise<Awaited<ReturnType<RadareService["appTriage"]>>>;
+    r2Strings(remotePath: string, query?: string, limit?: number): Promise<{
+        remotePath: string;
+        size: number;
+    } & Awaited<ReturnType<RadareService["strings"]>>>;
+    r2Imports(remotePath: string, query?: string, limit?: number): Promise<{
+        remotePath: string;
+        size: number;
+    } & Awaited<ReturnType<RadareService["imports"]>>>;
+    r2Functions(remotePath: string, limit?: number): Promise<{
+        remotePath: string;
+        size: number;
+    } & Awaited<ReturnType<RadareService["functions"]>>>;
+    r2FunctionDisasm(remotePath: string, functionNameOrAddress: string): Promise<{
+        remotePath: string;
+        size: number;
+    } & Awaited<ReturnType<RadareService["functionDisasm"]>>>;
+    private withTempR2Binary;
+    private assertR2Enabled;
     private runtimeConfigSummary;
     private authMethod;
     private envPresenceSummary;

@@ -12,6 +12,14 @@ export type ServerConfig = {
     maxReadSize: number;
     jsBundleMaxReadSize: number;
     sqliteMaxReadSize: number;
+    r2: {
+        enabled: boolean;
+        r2Path: string;
+        rabin2Path: string;
+        timeoutMs: number;
+        maxOutputBytes: number;
+        maxBinarySize: number;
+    };
     hermesDecoderPreset: "auto" | "hermesc" | "hbc-decompiler" | "hbc-disassembler" | "hbctool" | "jsc2llvm" | "custom";
     hermesDecoderCommand?: string;
     hermesDecoderOutputLimit: number;
