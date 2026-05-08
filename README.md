@@ -86,17 +86,33 @@ So yes: USB SSH needs a password unless you set up key-based auth.
 
 ## Install
 
-Use `npx` with the GitHub repo in your MCP config. No clone, no local config file.
+Use one command. Replace the host/password with your iPhone SSH details.
 
-All iPhone settings go in the MCP server `env` block.
+| Client | One-liner |
+| --- | --- |
+| Codex | `npx -p github:xtofuub/test iosfiles-mcp --client codex --host 192.168.1.23 --password change-me` |
+| Claude Desktop | `npx -p github:xtofuub/test iosfiles-mcp --client claude --host 192.168.1.23 --password change-me` |
+| OpenCode | `npx -p github:xtofuub/test iosfiles-mcp --client opencode --host 192.168.1.23 --password change-me` |
+| VS Code workspace | `npx -p github:xtofuub/test iosfiles-mcp --client vscode --host 192.168.1.23 --password change-me` |
+| All supported clients | `npx -p github:xtofuub/test iosfiles-mcp --client all --host 192.168.1.23 --password change-me` |
 
-For coding agents that need an explicit install command:
+The installer backs up existing config files to `.bak`, then writes the `ios-files` MCP server entry.
+
+VS Code writes to `.vscode/mcp.json` in the folder where you run the command.
+
+USB SSH example:
+
+```powershell
+npx -p github:xtofuub/test iosfiles-mcp --client codex --host 127.0.0.1 --port 2222 --password change-me
+```
+
+If a coding agent needs an explicit `npm install`, use:
 
 ```powershell
 npm install github:xtofuub/test
 ```
 
-To install and write MCP config in one command, pass the target client and iPhone SSH settings as env vars:
+To install with `npm install` and write MCP config in the same command, pass env vars:
 
 ```powershell
 $env:IOS_FILES_MCP_INSTALL_CLIENTS="codex"
@@ -106,15 +122,9 @@ $env:IOS_FILES_MCP_PASSWORD="change-me"
 npm install github:xtofuub/test
 ```
 
-Use `IOS_FILES_MCP_INSTALL_CLIENTS="claude"`, `"codex"`, `"opencode"`, or `"all"`.
+Use `IOS_FILES_MCP_INSTALL_CLIENTS="claude"`, `"codex"`, `"opencode"`, `"vscode"`, or `"all"`.
 
-You can also run the installer after install:
-
-```powershell
-npx -p github:xtofuub/test iosfiles-mcp --client codex --host 192.168.1.23 --password change-me
-```
-
-The installer backs up existing config files to `.bak`, then writes the `ios-files` MCP server entry.
+For MCP config without running the installer, use `npx` directly. No clone, no local config file.
 
 ### VS Code
 
@@ -218,6 +228,7 @@ The installer supports:
 | `claude` | Claude Desktop `claude_desktop_config.json` |
 | `codex` | `~/.codex/config.toml` |
 | `opencode` | `~/.config/opencode/opencode.json` |
+| `vscode` | `.vscode/mcp.json` in the current folder |
 | `all` | All supported clients |
 
 ## USB SSH MCP Config

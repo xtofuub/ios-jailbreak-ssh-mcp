@@ -38,8 +38,10 @@ async function main() {
       await installOpenCode(target, env, dryRun);
     } else if (client === "claude") {
       await installMcpServersJson(target, env, dryRun);
+    } else if (client === "vscode") {
+      await installVsCode(target, env, dryRun);
     } else {
-      throw new Error(`Unsupported client '${client}'. Use claude, codex, opencode, or all.`);
+      throw new Error(`Unsupported client '${client}'. Use claude, codex, opencode, vscode, or all.`);
     }
   }
 
@@ -100,6 +102,19 @@ async function installMcpServersJson(path, env, dryRun) {
 
   await writeJsonConfig(path, config, dryRun);
   console.log(`${dryRun ? "Would update" : "Updated"} Claude MCP config: ${path}`);
+}
+
+async function installVsCode(path, env, dryRun) {
+  const config = await readJsonConfig(path);
+  config.servers = objectValue(config.servers);
+  config.servers[SERVER_NAME] = {
+    command: "npx",
+    args: ["--yes", "--quiet", PACKAGE_SPEC],
+    env
+  };
+
+  await writeJsonConfig(path, config, dryRun);
+  console.log(`${dryRun ? "Would update" : "Updated"} VS Code MCP config: ${path}`);
 }
 
 async function installOpenCode(path, env, dryRun) {
@@ -220,16 +235,27 @@ function configPathFor(client) {
     return join(homedir(), ".config", "Claude", "claude_desktop_config.json");
   }
 
+  if (client === "vscode") {
+    return resolve(process.cwd(), ".vscode", "mcp.json");
+  }
+
   throw new Error(`No config path for client '${client}'.`);
 }
 
 function parseClients(input) {
   const clients = input
     .split(",")
-    .map((client) => client.trim().toLowerCase())
+    .map((client) => normalizeClient(client.trim().toLowerCase()))
     .filter(Boolean);
 
-  return clients.includes("all") ? ["claude", "codex", "opencode"] : clients;
+  return clients.includes("all") ? ["claude", "codex", "opencode", "vscode"] : clients;
+}
+
+function normalizeClient(client) {
+  if (["code", "vs-code", "vsc"].includes(client)) {
+    return "vscode";
+  }
+  return client;
 }
 
 function stringArg(name, envName) {
@@ -296,14 +322,14 @@ function printHelp() {
 
 Usage:
   iosfiles-mcp --client codex --host 192.168.1.23 --password change-me
-  iosfiles-mcp --client claude,opencode --host 127.0.0.1 --port 2222 --password change-me
+  iosfiles-mcp --client claude,opencode,vscode --host 127.0.0.1 --port 2222 --password change-me
 
 Clients:
-  claude, codex, opencode, all
+  claude, codex, opencode, vscode, all
 
 Options:
   --client <list>              Clients to update. Default: all
-  --config-path <path>         Override config path for one client
+  --config-path <path>         Override config path for one client. VS Code default: .vscode/mcp.json
   --host <host>                iPhone SSH host
   --port <port>                iPhone SSH port. Default: 22
   --username <name>            SSH username. Default: mobile
