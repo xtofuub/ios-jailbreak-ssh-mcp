@@ -20,7 +20,7 @@ Find the iOS device IP in `Settings -> Wi-Fi -> your network -> IP Address`, the
 ssh mobile@192.168.1.23
 ```
 
-Run the command for your coding agent. Replace `192.168.1.23` and `change-me`.
+Run the command for your coding agent. Replace `192.168.1.23` and `change-me`. Your default ssh password is alpine if you haven't changed it.
 
 ### Codex
 
