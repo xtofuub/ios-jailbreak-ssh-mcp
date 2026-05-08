@@ -58,7 +58,7 @@ export class RadareService {
         ]);
         const notes = [];
         if (!this.config.enabled) {
-            notes.push("radare2 tools are disabled. Set IOS_FILES_MCP_ENABLE_R2=true to enable them.");
+            notes.push("radare2 tools are disabled by config. Remove IOS_FILES_MCP_ENABLE_R2=false or set it to true to enable them.");
         }
         if (!r2.available || !rabin2.available) {
             notes.push("Install radare2 locally and make r2/rabin2 available on PATH, or set IOS_FILES_MCP_R2_PATH and IOS_FILES_MCP_RABIN2_PATH.");
@@ -535,7 +535,7 @@ export class RadareService {
     }
     assertEnabled() {
         if (!this.config.enabled) {
-            throw new Error("radare2 tools are disabled. Set IOS_FILES_MCP_ENABLE_R2=true in the MCP env block.");
+            throw new Error("radare2 tools are disabled by config. Remove IOS_FILES_MCP_ENABLE_R2=false or set it to true in the MCP env block.");
         }
     }
 }

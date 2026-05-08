@@ -1103,7 +1103,7 @@ export class SftpFileService {
     }
     assertR2Enabled() {
         if (!this.config.r2.enabled) {
-            throw new Error("radare2 tools are disabled. Set IOS_FILES_MCP_ENABLE_R2=true in the MCP env block.");
+            throw new Error("radare2 tools are disabled by config. Remove IOS_FILES_MCP_ENABLE_R2=false or set it to true in the MCP env block.");
         }
     }
     runtimeConfigSummary() {

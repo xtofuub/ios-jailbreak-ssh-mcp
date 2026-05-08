@@ -100,7 +100,7 @@ export function helpText() {
         "",
         "Safety:",
         "  The server is read-only by default. Writes require IOS_FILES_MCP_READ_ONLY=false and IOS_FILES_MCP_ALLOW_WRITES=true.",
-        "  Optional static binary analysis requires local radare2 and IOS_FILES_MCP_ENABLE_R2=true.",
+        "  Static binary analysis is enabled by default and requires local radare2. Set IOS_FILES_MCP_ENABLE_R2=false to disable it.",
         "",
         "JSON config files are still supported with --config or IOS_FILES_MCP_CONFIG, but MCP env config is the recommended setup."
     ].join("\n");
@@ -301,7 +301,7 @@ export async function loadConfig() {
         jsBundleMaxReadSize: merged.jsBundleMaxReadSize ?? SIXTY_FOUR_MIB,
         sqliteMaxReadSize: merged.sqliteMaxReadSize ?? SIXTY_FOUR_MIB,
         r2: {
-            enabled: merged.r2?.enabled ?? false,
+            enabled: merged.r2?.enabled ?? true,
             r2Path: merged.r2?.r2Path ?? "r2",
             rabin2Path: merged.r2?.rabin2Path ?? "rabin2",
             timeoutMs: merged.r2?.timeoutMs ?? 30_000,

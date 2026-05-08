@@ -425,7 +425,7 @@ These tools run `radare2` and `rabin2` locally on your computer, not on the iOS 
 Requirements:
 
 - Install radare2 locally so `r2` and `rabin2` are on PATH.
-- Enable the tools in MCP env with `IOS_FILES_MCP_ENABLE_R2=true`.
+- The tools are enabled by default. Set `IOS_FILES_MCP_ENABLE_R2=false` only if you want to disable them.
 - Static analysis only. Frida/runtime instrumentation is intentionally not included in this module.
 
 Optional env:

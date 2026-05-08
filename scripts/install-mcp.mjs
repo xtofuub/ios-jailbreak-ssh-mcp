@@ -81,7 +81,8 @@ function buildServerEnv() {
     IOS_FILES_MCP_READ_ONLY: stringArg("read-only", "IOS_FILES_MCP_READ_ONLY") ?? "true",
     IOS_FILES_MCP_ALLOW_WRITES: stringArg("allow-writes", "IOS_FILES_MCP_ALLOW_WRITES") ?? "false",
     IOS_FILES_MCP_REQUIRE_WRITE_APPROVAL:
-      stringArg("require-write-approval", "IOS_FILES_MCP_REQUIRE_WRITE_APPROVAL") ?? "true"
+      stringArg("require-write-approval", "IOS_FILES_MCP_REQUIRE_WRITE_APPROVAL") ?? "true",
+    IOS_FILES_MCP_ENABLE_R2: stringArg("enable-r2", "IOS_FILES_MCP_ENABLE_R2") ?? "true"
   };
 
   if (password) {
@@ -369,6 +370,7 @@ Options:
   --password <password>        SSH password
   --key-path <path>            SSH private key path
   --passphrase <passphrase>    SSH key passphrase
+  --enable-r2 <true|false>     Enable local radare2 static analysis tools. Default: true
   --install-hermes             Also install optional Hermes bytecode decoders
   --dry-run                    Print config instead of writing files
 

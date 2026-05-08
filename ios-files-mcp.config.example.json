@@ -24,7 +24,7 @@
   "jsBundleMaxReadSize": 67108864,
   "sqliteMaxReadSize": 67108864,
   "r2": {
-    "enabled": false,
+    "enabled": true,
     "r2Path": "r2",
     "rabin2Path": "rabin2",
     "timeoutMs": 30000,
