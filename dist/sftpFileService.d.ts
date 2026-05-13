@@ -242,10 +242,15 @@ type McpConfigStatusResult = {
         allowedRoots: string[];
         localArtifactRoots: string[];
         logPath: string;
+        sftpOpTimeoutMs: number;
         r2: {
             enabled: boolean;
+            mode: "auto" | "device" | "local";
+            activeRunner: "device" | "local" | "none";
             r2Path: string;
             rabin2Path: string;
+            deviceR2Path?: string;
+            deviceRabin2Path?: string;
             timeoutMs: number;
             maxOutputBytes: number;
             maxBinarySize: number;
@@ -310,7 +315,10 @@ export declare class SftpFileService {
     private canonicalAllowedRoots;
     private readonly searchCache;
     private readonly appFindCache;
-    private readonly radare;
+    private runnerPromise;
+    private radarePromise;
+    private activeRunnerMode;
+    private autoFallbackReason;
     constructor(config: ServerConfig);
     close(): Promise<void>;
     listDir(path: string): Promise<FileEntry[]>;
@@ -409,7 +417,16 @@ export declare class SftpFileService {
         remotePath: string;
         size: number;
     } & Awaited<ReturnType<RadareService["functionDisasm"]>>>;
-    private withTempR2Binary;
+    private withR2Binary;
+    private getR2Runner;
+    private getRadare;
+    private buildLocalRunner;
+    private buildDeviceRunner;
+    private selectR2Runner;
+    private probeDeviceRunner;
+    private probeLocalRunner;
+    private sftpResolverFactory;
+    private sshClient;
     private assertR2Enabled;
     private runtimeConfigSummary;
     private authMethod;
@@ -424,7 +441,9 @@ export declare class SftpFileService {
     private stripJsonComments;
     private redactCliArg;
     private connectedClient;
+    private connectWithRetry;
     private connect;
+    private withSftpTimeout;
     private resolveAllowedRoots;
     private resolveExistingSafePath;
     private resolveWritableTarget;
@@ -442,8 +461,12 @@ export declare class SftpFileService {
     private runHermesDecoder;
     private readDecoderOutputPath;
     private commandExists;
+    parseCommandTemplate(template: string): string[];
+    substituteTokens(tokens: string[], substitutions: Record<string, string>): {
+        command: string;
+        args: string[];
+    };
     private runCommand;
-    private shellQuote;
     private readRemoteRange;
     private openRemoteSqlite;
     private execSqliteRows;

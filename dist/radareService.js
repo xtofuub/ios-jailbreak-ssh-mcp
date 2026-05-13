@@ -1,4 +1,4 @@
-import { ProcessRunnerError, runProcess } from "./processRunner.js";
+import { ProcessRunnerError } from "./r2Runner.js";
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
 const INTERESTING_IMPORT_QUERIES = [
@@ -47,35 +47,25 @@ const INTERESTING_STRING_QUERIES = [
     "WKWebView"
 ];
 export class RadareService {
-    config;
-    constructor(config) {
-        this.config = config;
+    runner;
+    opts;
+    constructor(runner, opts) {
+        this.runner = runner;
+        this.opts = opts;
     }
-    async check() {
-        const [r2, rabin2] = await Promise.all([
-            this.checkCommand(this.config.r2Path, ["-v"]),
-            this.checkCommand(this.config.rabin2Path, ["-v"])
-        ]);
-        const notes = [];
-        if (!this.config.enabled) {
-            notes.push("radare2 tools are disabled by config. Remove IOS_FILES_MCP_ENABLE_R2=false or set it to true to enable them.");
-        }
-        if (!r2.available || !rabin2.available) {
-            notes.push("Install radare2 locally and make r2/rabin2 available on PATH, or set IOS_FILES_MCP_R2_PATH and IOS_FILES_MCP_RABIN2_PATH.");
-        }
-        return {
-            enabled: this.config.enabled,
-            r2Path: this.config.r2Path,
-            rabin2Path: this.config.rabin2Path,
-            r2,
-            rabin2,
-            notes
-        };
+    get mode() {
+        return this.runner.mode;
     }
-    async binaryInfo(localPath) {
+    get r2Path() {
+        return this.runner.r2Path;
+    }
+    get rabin2Path() {
+        return this.runner.rabin2Path;
+    }
+    async binaryInfo(argvPath) {
         const [info, linkedLibraries] = await Promise.all([
-            this.readInfo(localPath),
-            this.readLinkedLibraries(localPath)
+            this.readInfo(argvPath),
+            this.readLinkedLibraries(argvPath)
         ]);
         return {
             info,
@@ -83,9 +73,9 @@ export class RadareService {
             notes: this.analysisNotes(info)
         };
     }
-    async imports(localPath, query, limit) {
+    async imports(argvPath, query, limit) {
         const normalizedLimit = this.normalizeLimit(limit);
-        const imports = await this.readImports(localPath);
+        const imports = await this.readImports(argvPath);
         const filtered = this.filterItems(imports, query, (item) => [
             item.name,
             item.library,
@@ -99,9 +89,9 @@ export class RadareService {
             limit: normalizedLimit
         };
     }
-    async strings(localPath, query, limit) {
+    async strings(argvPath, query, limit) {
         const normalizedLimit = this.normalizeLimit(limit);
-        const strings = await this.readStrings(localPath);
+        const strings = await this.readStrings(argvPath);
         const filtered = this.filterItems(strings, query, (item) => [
             item.string,
             item.section,
@@ -114,22 +104,33 @@ export class RadareService {
             limit: normalizedLimit
         };
     }
-    async functions(localPath, limit) {
+    async functions(argvPath, limit) {
         const normalizedLimit = this.normalizeLimit(limit);
-        const functions = await this.readFunctions(localPath);
+        const functions = await this.readFunctions(argvPath);
         return {
             functions: functions.slice(0, normalizedLimit),
             returned: Math.min(functions.length, normalizedLimit),
             limit: normalizedLimit
         };
     }
-    async functionDisasm(localPath, functionNameOrAddress) {
+    async functionDisasm(argvPath, functionNameOrAddress) {
         const target = functionNameOrAddress.trim();
         if (!target) {
             throw new Error("functionNameOrAddress must be non-empty.");
         }
-        const resolved = await this.resolveFunctionTarget(localPath, target);
-        const json = await this.r2Json(localPath, ["-q", "-2", "-c", "aaa", "-c", `s ${resolved.address}`, "-c", "pdfj", "-c", "q"]);
+        const resolved = await this.resolveFunctionTarget(argvPath, target);
+        const json = await this.r2Json(argvPath, [
+            "-q",
+            "-2",
+            "-c",
+            "aaa",
+            "-c",
+            `s ${resolved.address}`,
+            "-c",
+            "pdfj",
+            "-c",
+            "q"
+        ]);
         const record = this.asRecord(json) ?? {};
         const ops = this.arrayValue(record.ops)
             .map((item) => this.normalizeOperation(item))
@@ -145,11 +146,11 @@ export class RadareService {
     }
     async appTriage(input) {
         const [info, linkedLibraries, imports, strings, functions] = await Promise.all([
-            this.readInfo(input.localPath),
-            this.readLinkedLibraries(input.localPath),
-            this.readImports(input.localPath),
-            this.readStrings(input.localPath),
-            this.readFunctions(input.localPath)
+            this.readInfo(input.argvPath),
+            this.readLinkedLibraries(input.argvPath),
+            this.readImports(input.argvPath),
+            this.readStrings(input.argvPath),
+            this.readFunctions(input.argvPath)
         ]);
         const interestingImports = this.interestingImports(imports).slice(0, DEFAULT_LIMIT);
         const interestingStrings = this.interestingStrings(strings).slice(0, DEFAULT_LIMIT);
@@ -175,25 +176,15 @@ export class RadareService {
             })
         };
     }
-    async checkCommand(command, args) {
-        try {
-            const result = await runProcess(command, args, {
-                timeoutMs: Math.min(this.config.timeoutMs, 10_000),
-                maxOutputBytes: 16 * 1024,
-                allowNonZero: false
-            });
-            const version = (result.stdout || result.stderr).split(/\r?\n/).find(Boolean)?.trim();
-            return { available: true, version };
-        }
-        catch (error) {
-            return {
-                available: false,
-                error: error instanceof Error ? error.message : String(error)
-            };
-        }
+    execOpts() {
+        return {
+            timeoutMs: this.opts.timeoutMs,
+            maxOutputBytes: this.opts.maxOutputBytes,
+            allowNonZero: false
+        };
     }
-    async readInfo(localPath) {
-        const json = await this.rabinJson(["-Ij", localPath]);
+    async readInfo(argvPath) {
+        const json = await this.rabinJson(["-Ij", argvPath]);
         const record = this.asRecord(json) ?? {};
         const bin = this.asRecord(record.bin) ?? record;
         return {
@@ -217,8 +208,8 @@ export class RadareService {
             baseAddress: this.addressValue(bin.baddr)
         };
     }
-    async readLinkedLibraries(localPath) {
-        const json = await this.rabinJson(["-lj", localPath]);
+    async readLinkedLibraries(argvPath) {
+        const json = await this.rabinJson(["-lj", argvPath]);
         const items = this.arrayValue(json);
         return items
             .map((item) => {
@@ -230,44 +221,34 @@ export class RadareService {
         })
             .filter((item) => Boolean(item));
     }
-    async readImports(localPath) {
-        const json = await this.rabinJson(["-ij", localPath]);
+    async readImports(argvPath) {
+        const json = await this.rabinJson(["-ij", argvPath]);
         return this.arrayValue(json)
             .map((item) => this.normalizeImport(item))
             .filter((item) => Boolean(item));
     }
-    async readStrings(localPath) {
-        const json = await this.rabinJson(["-zzj", localPath]);
+    async readStrings(argvPath) {
+        const json = await this.rabinJson(["-zzj", argvPath]);
         return this.arrayValue(json)
             .map((item) => this.normalizeString(item))
             .filter((item) => Boolean(item));
     }
-    async readFunctions(localPath) {
-        const json = await this.r2Json(localPath, ["-q", "-2", "-c", "aaa", "-c", "aflj", "-c", "q"]);
+    async readFunctions(argvPath) {
+        const json = await this.r2Json(argvPath, ["-q", "-2", "-c", "aaa", "-c", "aflj", "-c", "q"]);
         return this.arrayValue(json)
             .map((item) => this.normalizeFunction(item))
             .filter((item) => Boolean(item));
     }
     async rabinJson(args) {
-        this.assertEnabled();
-        const result = await runProcess(this.config.rabin2Path, args, {
-            timeoutMs: this.config.timeoutMs,
-            maxOutputBytes: this.config.maxOutputBytes,
-            allowNonZero: false
-        });
-        return this.parseJsonOutput(result.stdout, "rabin2");
+        const result = await this.runner.runRabin2(args, this.execOpts());
+        return this.parseJsonOutput(result, "rabin2");
     }
-    async r2Json(localPath, args) {
-        this.assertEnabled();
-        const result = await runProcess(this.config.r2Path, [...args, localPath], {
-            timeoutMs: this.config.timeoutMs,
-            maxOutputBytes: this.config.maxOutputBytes,
-            allowNonZero: false
-        });
-        return this.parseJsonOutput(result.stdout, "r2");
+    async r2Json(argvPath, args) {
+        const result = await this.runner.runR2([...args, argvPath], this.execOpts());
+        return this.parseJsonOutput(result, "r2");
     }
-    parseJsonOutput(stdout, command) {
-        const trimmed = stdout.trim();
+    parseJsonOutput(result, command) {
+        const trimmed = result.stdout.trim();
         if (!trimmed) {
             return [];
         }
@@ -276,12 +257,12 @@ export class RadareService {
         }
         catch (error) {
             if (error instanceof SyntaxError) {
-                throw new Error(`${command} did not return valid JSON. Check that radare2 supports the requested JSON mode.`);
+                throw new Error(`${command} did not return valid JSON. stderr: ${result.stderr.trim().slice(0, 512) || "<empty>"}`);
             }
             throw error;
         }
     }
-    async resolveFunctionTarget(localPath, target) {
+    async resolveFunctionTarget(argvPath, target) {
         const directAddress = this.parseAddress(target);
         if (directAddress) {
             return { address: directAddress };
@@ -289,7 +270,7 @@ export class RadareService {
         if (/[\r\n;]/.test(target)) {
             throw new Error("Function names cannot contain r2 command separators. Pass the address from ios_r2_functions instead.");
         }
-        const functions = await this.readFunctions(localPath);
+        const functions = await this.readFunctions(argvPath);
         const exact = functions.find((item) => item.name === target);
         const loose = exact ?? functions.find((item) => item.name.toLowerCase() === target.toLowerCase());
         if (!loose?.address) {
@@ -532,11 +513,6 @@ export class RadareService {
             }
         }
         return [];
-    }
-    assertEnabled() {
-        if (!this.config.enabled) {
-            throw new Error("radare2 tools are disabled by config. Remove IOS_FILES_MCP_ENABLE_R2=false or set it to true in the MCP env block.");
-        }
     }
 }
 export { ProcessRunnerError };

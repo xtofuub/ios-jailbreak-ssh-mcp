@@ -1,7 +1,6 @@
-import { ProcessRunnerError, runProcess } from "./processRunner.js";
-import type { ServerConfig } from "./types.js";
+import type { R2ExecOptions, R2ExecResult, R2Runner } from "./r2Runner.js";
+import { ProcessRunnerError } from "./r2Runner.js";
 
-type R2Config = ServerConfig["r2"];
 type JsonRecord = Record<string, unknown>;
 
 export type R2InfoSummary = {
@@ -66,19 +65,26 @@ export type R2SuggestedAction = {
   exampleArgs: Record<string, unknown>;
 };
 
-export type R2CheckResult = {
-  enabled: boolean;
-  r2Path: string;
-  rabin2Path: string;
-  r2: CommandCheck;
-  rabin2: CommandCheck;
-  notes: string[];
-};
-
-type CommandCheck = {
+export type R2RunnerCheck = {
   available: boolean;
   version?: string;
   error?: string;
+};
+
+export type R2CheckResult = {
+  enabled: boolean;
+  mode: "auto" | "device" | "local";
+  activeRunner: "device" | "local" | "none";
+  r2: R2RunnerCheck;
+  rabin2: R2RunnerCheck;
+  device?: { r2Path: string; rabin2Path: string; r2: R2RunnerCheck; rabin2: R2RunnerCheck };
+  local?: { r2Path: string; rabin2Path: string; r2: R2RunnerCheck; rabin2: R2RunnerCheck };
+  notes: string[];
+};
+
+export type RadareServiceOptions = {
+  timeoutMs: number;
+  maxOutputBytes: number;
 };
 
 const DEFAULT_LIMIT = 100;
@@ -132,41 +138,31 @@ const INTERESTING_STRING_QUERIES = [
 ];
 
 export class RadareService {
-  constructor(private readonly config: R2Config) {}
+  constructor(
+    private readonly runner: R2Runner,
+    private readonly opts: RadareServiceOptions
+  ) {}
 
-  async check(): Promise<R2CheckResult> {
-    const [r2, rabin2] = await Promise.all([
-      this.checkCommand(this.config.r2Path, ["-v"]),
-      this.checkCommand(this.config.rabin2Path, ["-v"])
-    ]);
-    const notes: string[] = [];
-
-    if (!this.config.enabled) {
-      notes.push("radare2 tools are disabled by config. Remove IOS_FILES_MCP_ENABLE_R2=false or set it to true to enable them.");
-    }
-
-    if (!r2.available || !rabin2.available) {
-      notes.push("Install radare2 locally and make r2/rabin2 available on PATH, or set IOS_FILES_MCP_R2_PATH and IOS_FILES_MCP_RABIN2_PATH.");
-    }
-
-    return {
-      enabled: this.config.enabled,
-      r2Path: this.config.r2Path,
-      rabin2Path: this.config.rabin2Path,
-      r2,
-      rabin2,
-      notes
-    };
+  get mode(): "device" | "local" {
+    return this.runner.mode;
   }
 
-  async binaryInfo(localPath: string): Promise<{
+  get r2Path(): string {
+    return this.runner.r2Path;
+  }
+
+  get rabin2Path(): string {
+    return this.runner.rabin2Path;
+  }
+
+  async binaryInfo(argvPath: string): Promise<{
     info: R2InfoSummary;
     linkedLibraries: string[];
     notes: string[];
   }> {
     const [info, linkedLibraries] = await Promise.all([
-      this.readInfo(localPath),
-      this.readLinkedLibraries(localPath)
+      this.readInfo(argvPath),
+      this.readLinkedLibraries(argvPath)
     ]);
 
     return {
@@ -176,14 +172,14 @@ export class RadareService {
     };
   }
 
-  async imports(localPath: string, query?: string, limit?: number): Promise<{
+  async imports(argvPath: string, query?: string, limit?: number): Promise<{
     query?: string;
     imports: R2Import[];
     returned: number;
     limit: number;
   }> {
     const normalizedLimit = this.normalizeLimit(limit);
-    const imports = await this.readImports(localPath);
+    const imports = await this.readImports(argvPath);
     const filtered = this.filterItems(imports, query, (item) => [
       item.name,
       item.library,
@@ -199,14 +195,14 @@ export class RadareService {
     };
   }
 
-  async strings(localPath: string, query?: string, limit?: number): Promise<{
+  async strings(argvPath: string, query?: string, limit?: number): Promise<{
     query?: string;
     strings: R2String[];
     returned: number;
     limit: number;
   }> {
     const normalizedLimit = this.normalizeLimit(limit);
-    const strings = await this.readStrings(localPath);
+    const strings = await this.readStrings(argvPath);
     const filtered = this.filterItems(strings, query, (item) => [
       item.string,
       item.section,
@@ -221,13 +217,13 @@ export class RadareService {
     };
   }
 
-  async functions(localPath: string, limit?: number): Promise<{
+  async functions(argvPath: string, limit?: number): Promise<{
     functions: R2Function[];
     returned: number;
     limit: number;
   }> {
     const normalizedLimit = this.normalizeLimit(limit);
-    const functions = await this.readFunctions(localPath);
+    const functions = await this.readFunctions(argvPath);
 
     return {
       functions: functions.slice(0, normalizedLimit),
@@ -237,7 +233,7 @@ export class RadareService {
   }
 
   async functionDisasm(
-    localPath: string,
+    argvPath: string,
     functionNameOrAddress: string
   ): Promise<{
     functionNameOrAddress: string;
@@ -252,8 +248,19 @@ export class RadareService {
       throw new Error("functionNameOrAddress must be non-empty.");
     }
 
-    const resolved = await this.resolveFunctionTarget(localPath, target);
-    const json = await this.r2Json(localPath, ["-q", "-2", "-c", "aaa", "-c", `s ${resolved.address}`, "-c", "pdfj", "-c", "q"]);
+    const resolved = await this.resolveFunctionTarget(argvPath, target);
+    const json = await this.r2Json(argvPath, [
+      "-q",
+      "-2",
+      "-c",
+      "aaa",
+      "-c",
+      `s ${resolved.address}`,
+      "-c",
+      "pdfj",
+      "-c",
+      "q"
+    ]);
     const record = this.asRecord(json) ?? {};
     const ops = this.arrayValue(record.ops)
       .map((item) => this.normalizeOperation(item))
@@ -271,7 +278,7 @@ export class RadareService {
 
   async appTriage(input: {
     bundleId: string;
-    localPath: string;
+    argvPath: string;
     remoteBinaryPath: string;
   }): Promise<{
     bundleId: string;
@@ -290,11 +297,11 @@ export class RadareService {
     suggestedNextActions: R2SuggestedAction[];
   }> {
     const [info, linkedLibraries, imports, strings, functions] = await Promise.all([
-      this.readInfo(input.localPath),
-      this.readLinkedLibraries(input.localPath),
-      this.readImports(input.localPath),
-      this.readStrings(input.localPath),
-      this.readFunctions(input.localPath)
+      this.readInfo(input.argvPath),
+      this.readLinkedLibraries(input.argvPath),
+      this.readImports(input.argvPath),
+      this.readStrings(input.argvPath),
+      this.readFunctions(input.argvPath)
     ]);
     const interestingImports = this.interestingImports(imports).slice(0, DEFAULT_LIMIT);
     const interestingStrings = this.interestingStrings(strings).slice(0, DEFAULT_LIMIT);
@@ -322,25 +329,16 @@ export class RadareService {
     };
   }
 
-  private async checkCommand(command: string, args: string[]): Promise<CommandCheck> {
-    try {
-      const result = await runProcess(command, args, {
-        timeoutMs: Math.min(this.config.timeoutMs, 10_000),
-        maxOutputBytes: 16 * 1024,
-        allowNonZero: false
-      });
-      const version = (result.stdout || result.stderr).split(/\r?\n/).find(Boolean)?.trim();
-      return { available: true, version };
-    } catch (error) {
-      return {
-        available: false,
-        error: error instanceof Error ? error.message : String(error)
-      };
-    }
+  private execOpts(): R2ExecOptions {
+    return {
+      timeoutMs: this.opts.timeoutMs,
+      maxOutputBytes: this.opts.maxOutputBytes,
+      allowNonZero: false
+    };
   }
 
-  private async readInfo(localPath: string): Promise<R2InfoSummary> {
-    const json = await this.rabinJson(["-Ij", localPath]);
+  private async readInfo(argvPath: string): Promise<R2InfoSummary> {
+    const json = await this.rabinJson(["-Ij", argvPath]);
     const record = this.asRecord(json) ?? {};
     const bin = this.asRecord(record.bin) ?? record;
 
@@ -366,8 +364,8 @@ export class RadareService {
     };
   }
 
-  private async readLinkedLibraries(localPath: string): Promise<string[]> {
-    const json = await this.rabinJson(["-lj", localPath]);
+  private async readLinkedLibraries(argvPath: string): Promise<string[]> {
+    const json = await this.rabinJson(["-lj", argvPath]);
     const items = this.arrayValue(json);
     return items
       .map((item) => {
@@ -380,51 +378,39 @@ export class RadareService {
       .filter((item): item is string => Boolean(item));
   }
 
-  private async readImports(localPath: string): Promise<R2Import[]> {
-    const json = await this.rabinJson(["-ij", localPath]);
+  private async readImports(argvPath: string): Promise<R2Import[]> {
+    const json = await this.rabinJson(["-ij", argvPath]);
     return this.arrayValue(json)
       .map((item) => this.normalizeImport(item))
       .filter((item): item is R2Import => Boolean(item));
   }
 
-  private async readStrings(localPath: string): Promise<R2String[]> {
-    const json = await this.rabinJson(["-zzj", localPath]);
+  private async readStrings(argvPath: string): Promise<R2String[]> {
+    const json = await this.rabinJson(["-zzj", argvPath]);
     return this.arrayValue(json)
       .map((item) => this.normalizeString(item))
       .filter((item): item is R2String => Boolean(item));
   }
 
-  private async readFunctions(localPath: string): Promise<R2Function[]> {
-    const json = await this.r2Json(localPath, ["-q", "-2", "-c", "aaa", "-c", "aflj", "-c", "q"]);
+  private async readFunctions(argvPath: string): Promise<R2Function[]> {
+    const json = await this.r2Json(argvPath, ["-q", "-2", "-c", "aaa", "-c", "aflj", "-c", "q"]);
     return this.arrayValue(json)
       .map((item) => this.normalizeFunction(item))
       .filter((item): item is R2Function => Boolean(item));
   }
 
   private async rabinJson(args: string[]): Promise<unknown> {
-    this.assertEnabled();
-    const result = await runProcess(this.config.rabin2Path, args, {
-      timeoutMs: this.config.timeoutMs,
-      maxOutputBytes: this.config.maxOutputBytes,
-      allowNonZero: false
-    });
-
-    return this.parseJsonOutput(result.stdout, "rabin2");
+    const result = await this.runner.runRabin2(args, this.execOpts());
+    return this.parseJsonOutput(result, "rabin2");
   }
 
-  private async r2Json(localPath: string, args: string[]): Promise<unknown> {
-    this.assertEnabled();
-    const result = await runProcess(this.config.r2Path, [...args, localPath], {
-      timeoutMs: this.config.timeoutMs,
-      maxOutputBytes: this.config.maxOutputBytes,
-      allowNonZero: false
-    });
-
-    return this.parseJsonOutput(result.stdout, "r2");
+  private async r2Json(argvPath: string, args: string[]): Promise<unknown> {
+    const result = await this.runner.runR2([...args, argvPath], this.execOpts());
+    return this.parseJsonOutput(result, "r2");
   }
 
-  private parseJsonOutput(stdout: string, command: string): unknown {
-    const trimmed = stdout.trim();
+  private parseJsonOutput(result: R2ExecResult, command: string): unknown {
+    const trimmed = result.stdout.trim();
     if (!trimmed) {
       return [];
     }
@@ -433,14 +419,16 @@ export class RadareService {
       return JSON.parse(trimmed);
     } catch (error) {
       if (error instanceof SyntaxError) {
-        throw new Error(`${command} did not return valid JSON. Check that radare2 supports the requested JSON mode.`);
+        throw new Error(
+          `${command} did not return valid JSON. stderr: ${result.stderr.trim().slice(0, 512) || "<empty>"}`
+        );
       }
       throw error;
     }
   }
 
   private async resolveFunctionTarget(
-    localPath: string,
+    argvPath: string,
     target: string
   ): Promise<{ address: string; name?: string }> {
     const directAddress = this.parseAddress(target);
@@ -452,7 +440,7 @@ export class RadareService {
       throw new Error("Function names cannot contain r2 command separators. Pass the address from ios_r2_functions instead.");
     }
 
-    const functions = await this.readFunctions(localPath);
+    const functions = await this.readFunctions(argvPath);
     const exact = functions.find((item) => item.name === target);
     const loose = exact ?? functions.find((item) => item.name.toLowerCase() === target.toLowerCase());
 
@@ -765,12 +753,6 @@ export class RadareService {
     }
 
     return [];
-  }
-
-  private assertEnabled(): void {
-    if (!this.config.enabled) {
-      throw new Error("radare2 tools are disabled by config. Remove IOS_FILES_MCP_ENABLE_R2=false or set it to true in the MCP env block.");
-    }
   }
 }
 

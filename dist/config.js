@@ -29,8 +29,11 @@ const rawConfigSchema = z
     r2: z
         .object({
         enabled: z.boolean().optional(),
+        mode: z.enum(["auto", "device", "local"]).optional(),
         r2Path: z.string().min(1).optional(),
         rabin2Path: z.string().min(1).optional(),
+        deviceR2Path: z.string().min(1).optional(),
+        deviceRabin2Path: z.string().min(1).optional(),
         timeoutMs: z.coerce.number().int().positive().optional(),
         maxOutputBytes: z.coerce.number().int().positive().optional(),
         maxBinarySize: z.coerce.number().int().positive().optional()
@@ -51,6 +54,7 @@ const rawConfigSchema = z
     writeApprovalTtlMs: z.coerce.number().int().positive().optional(),
     connectTimeoutMs: z.coerce.number().int().positive().optional(),
     readyTimeoutMs: z.coerce.number().int().positive().optional(),
+    sftpOpTimeoutMs: z.coerce.number().int().positive().optional(),
     logPath: z.string().min(1).optional()
 })
     .strict();
@@ -180,6 +184,17 @@ function readHermesDecoderPresetEnv() {
     }
     return result.data;
 }
+function readR2ModeEnv() {
+    const value = process.env.IOS_FILES_MCP_R2_MODE;
+    if (value === undefined || value.trim() === "") {
+        return undefined;
+    }
+    const normalized = value.trim().toLowerCase();
+    if (normalized !== "auto" && normalized !== "device" && normalized !== "local") {
+        throw new ConfigError("IOS_FILES_MCP_R2_MODE must be one of: auto, device, local.");
+    }
+    return normalized;
+}
 function envConfig() {
     const allowedRoots = process.env.IOS_FILES_MCP_ALLOWED_ROOTS
         ?.split(",")
@@ -191,8 +206,11 @@ function envConfig() {
         .filter(Boolean);
     const r2Config = pruneUndefined({
         enabled: readBooleanEnv("IOS_FILES_MCP_ENABLE_R2"),
+        mode: readR2ModeEnv(),
         r2Path: process.env.IOS_FILES_MCP_R2_PATH,
         rabin2Path: process.env.IOS_FILES_MCP_RABIN2_PATH,
+        deviceR2Path: process.env.IOS_FILES_MCP_R2_DEVICE_R2_PATH,
+        deviceRabin2Path: process.env.IOS_FILES_MCP_R2_DEVICE_RABIN2_PATH,
         timeoutMs: readNumberEnv("IOS_FILES_MCP_R2_TIMEOUT_MS"),
         maxOutputBytes: readNumberEnv("IOS_FILES_MCP_R2_MAX_OUTPUT_BYTES"),
         maxBinarySize: readNumberEnv("IOS_FILES_MCP_R2_MAX_BINARY_SIZE")
@@ -224,6 +242,7 @@ function envConfig() {
         writeApprovalTtlMs: readNumberEnv("IOS_FILES_MCP_WRITE_APPROVAL_TTL_MS"),
         connectTimeoutMs: readNumberEnv("IOS_FILES_MCP_CONNECT_TIMEOUT_MS"),
         readyTimeoutMs: readNumberEnv("IOS_FILES_MCP_READY_TIMEOUT_MS"),
+        sftpOpTimeoutMs: readNumberEnv("IOS_FILES_MCP_SFTP_OP_TIMEOUT_MS"),
         logPath: process.env.IOS_FILES_MCP_LOG
     };
 }
@@ -282,16 +301,25 @@ export async function loadConfig() {
         resolve(homedir(), "Downloads")
     ];
     const localArtifactRoots = (merged.localArtifactRoots ?? defaultLocalRoots).map((root) => resolveFromBase(root, loadedConfig.baseDir));
+    const resolvedPrivateKeyPath = envOverrides.privateKeyPath
+        ? resolve(envOverrides.privateKeyPath)
+        : fileConfig.privateKeyPath
+            ? resolveFromBase(fileConfig.privateKeyPath, loadedConfig.baseDir)
+            : undefined;
+    if (resolvedPrivateKeyPath) {
+        try {
+            await access(resolvedPrivateKeyPath, constants.R_OK);
+        }
+        catch {
+            throw new ConfigError(`SSH private key not readable: ${resolvedPrivateKeyPath}. Check IOS_FILES_MCP_KEY_PATH or the privateKeyPath in your JSON config.`);
+        }
+    }
     return {
         host,
         port: merged.port ?? 22,
         username: merged.username ?? "mobile",
         password: merged.password ?? undefined,
-        privateKeyPath: envOverrides.privateKeyPath
-            ? resolve(envOverrides.privateKeyPath)
-            : fileConfig.privateKeyPath
-                ? resolveFromBase(fileConfig.privateKeyPath, loadedConfig.baseDir)
-                : undefined,
+        privateKeyPath: resolvedPrivateKeyPath,
         passphrase: merged.passphrase ?? undefined,
         allowedRoots,
         localArtifactRoots,
@@ -302,8 +330,11 @@ export async function loadConfig() {
         sqliteMaxReadSize: merged.sqliteMaxReadSize ?? SIXTY_FOUR_MIB,
         r2: {
             enabled: merged.r2?.enabled ?? true,
+            mode: merged.r2?.mode ?? "auto",
             r2Path: merged.r2?.r2Path ?? "r2",
             rabin2Path: merged.r2?.rabin2Path ?? "rabin2",
+            deviceR2Path: merged.r2?.deviceR2Path,
+            deviceRabin2Path: merged.r2?.deviceRabin2Path,
             timeoutMs: merged.r2?.timeoutMs ?? 30_000,
             maxOutputBytes: merged.r2?.maxOutputBytes ?? SIXTEEN_MIB,
             maxBinarySize: merged.r2?.maxBinarySize ?? ONE_TWENTY_EIGHT_MIB
@@ -320,6 +351,7 @@ export async function loadConfig() {
         writeApprovalTtlMs: merged.writeApprovalTtlMs ?? FIVE_MINUTES_MS,
         connectTimeoutMs: merged.connectTimeoutMs ?? 15_000,
         readyTimeoutMs: merged.readyTimeoutMs ?? 15_000,
+        sftpOpTimeoutMs: merged.sftpOpTimeoutMs ?? (merged.connectTimeoutMs ?? 15_000) * 3,
         logPath: envOverrides.logPath
             ? resolve(envOverrides.logPath)
             : resolveFromBase(fileConfig.logPath ?? "ios-files-mcp.log", loadedConfig.baseDir)

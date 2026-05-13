@@ -9,6 +9,7 @@ import { parse as parseXmlPlist, parseBinary as parseBinaryPlist } from "plist";
 import Client from "ssh2-sftp-client";
 import { assertSafePath, assertWritable, backupPathFor, basename, dirname, joinRemote, normalizeRemotePath } from "./pathSafety.js";
 import { RadareService } from "./radareService.js";
+import { DeviceR2Runner, LocalR2Runner } from "./r2Runner.js";
 const PACKAGE_SPEC = "github:xtofuub/ios-files-mcp";
 const MCP_SERVER_NAME = "ios-files";
 const SEARCH_ABSOLUTE_MAX_RESULTS = 500;
@@ -85,10 +86,12 @@ export class SftpFileService {
     canonicalAllowedRoots = [];
     searchCache = new Map();
     appFindCache = new Map();
-    radare;
+    runnerPromise;
+    radarePromise;
+    activeRunnerMode = "none";
+    autoFallbackReason;
     constructor(config) {
         this.config = config;
-        this.radare = new RadareService(config.r2);
     }
     async close() {
         if (this.client) {
@@ -101,7 +104,7 @@ export class SftpFileService {
         const lexicalPath = assertSafePath(path, this.config);
         const client = await this.connectedClient();
         const safePath = await this.resolveExistingSafePath(client, lexicalPath);
-        const entries = await client.list(safePath);
+        const entries = await this.withSftpTimeout(client.list(safePath), `list ${safePath}`);
         return entries.map((entry) => this.fileEntryFromClientInfo(entry));
     }
     async readFile(path) {
@@ -495,8 +498,16 @@ export class SftpFileService {
         if (!mcpConfig.commandAvailability.npx) {
             nextSteps.push("Install Node.js/npm or make sure npx is available on PATH for the MCP client.");
         }
-        if (radare2.enabled && (!radare2.r2.available || !radare2.rabin2.available)) {
-            nextSteps.push("radare2 is enabled but r2/rabin2 are not available to the MCP process. Install radare2 or set IOS_FILES_MCP_R2_PATH and IOS_FILES_MCP_RABIN2_PATH.");
+        if (radare2.enabled && radare2.activeRunner === "none") {
+            if (radare2.mode === "device") {
+                nextSteps.push("radare2 is enabled with mode=device but r2/rabin2 were not found on the iOS device. Install via Sileo (Procursus 'radare2'), or set IOS_FILES_MCP_R2_MODE=auto.");
+            }
+            else if (radare2.mode === "local") {
+                nextSteps.push("radare2 is enabled with mode=local but r2/rabin2 are not available on this computer. Install r2 locally or set IOS_FILES_MCP_R2_MODE=device.");
+            }
+            else {
+                nextSteps.push("radare2 is enabled but no working runner was found. Install radare2 on the iOS device via Sileo (recommended), or install r2 locally.");
+            }
         }
         const missingLocalRoots = localArtifactRoots.filter((root) => !root.exists);
         if (missingLocalRoots.length > 0) {
@@ -1008,13 +1019,83 @@ export class SftpFileService {
         };
     }
     async r2Check() {
-        return this.radare.check();
+        const mode = this.config.r2.mode;
+        if (!this.config.r2.enabled) {
+            const disabled = { available: false, error: "radare2 tools are disabled" };
+            return {
+                enabled: false,
+                mode,
+                activeRunner: "none",
+                r2: disabled,
+                rabin2: disabled,
+                notes: ["radare2 tools are disabled by config. Remove IOS_FILES_MCP_ENABLE_R2=false or set it to true."]
+            };
+        }
+        let device;
+        let local;
+        const notes = [];
+        if (mode !== "local") {
+            device = await this.probeDeviceRunner();
+        }
+        if (mode !== "device") {
+            local = await this.probeLocalRunner();
+        }
+        let activeRunner = "none";
+        let r2;
+        let rabin2;
+        if (mode === "device") {
+            activeRunner = device && device.r2.available && device.rabin2.available ? "device" : "none";
+            r2 = device?.r2 ?? { available: false, error: "device probe skipped" };
+            rabin2 = device?.rabin2 ?? { available: false, error: "device probe skipped" };
+            if (activeRunner !== "device") {
+                notes.push(`radare2 not found on the iOS device (r2.mode=device). Install via Sileo (Procursus 'radare2'), or set IOS_FILES_MCP_R2_MODE=auto to allow a local fallback.`);
+            }
+            else if (device?.r2.version) {
+                notes.push(`Using device-side radare2 at ${device.r2Path} (${device.r2.version}).`);
+            }
+        }
+        else if (mode === "local") {
+            activeRunner = local && local.r2.available && local.rabin2.available ? "local" : "none";
+            r2 = local?.r2 ?? { available: false, error: "local probe skipped" };
+            rabin2 = local?.rabin2 ?? { available: false, error: "local probe skipped" };
+            if (activeRunner !== "local") {
+                notes.push("radare2 not available locally. Install r2/rabin2 on this computer or set IOS_FILES_MCP_R2_MODE=device to use the iOS device install.");
+            }
+            else if (local?.r2.version) {
+                notes.push(`Using local radare2 at ${local.r2Path} (${local.r2.version}).`);
+            }
+        }
+        else {
+            // auto
+            if (device && device.r2.available && device.rabin2.available) {
+                activeRunner = "device";
+                r2 = device.r2;
+                rabin2 = device.rabin2;
+                if (device.r2.version) {
+                    notes.push(`Using device-side radare2 at ${device.r2Path} (${device.r2.version}).`);
+                }
+            }
+            else if (local && local.r2.available && local.rabin2.available) {
+                activeRunner = "local";
+                r2 = local.r2;
+                rabin2 = local.rabin2;
+                const deviceErr = device?.r2.error ?? device?.rabin2.error ?? "device probe failed";
+                notes.push(`Device r2 unavailable (${deviceErr}); falling back to local radare2 at ${local.r2Path}.`);
+            }
+            else {
+                activeRunner = "none";
+                r2 = device?.r2 ?? local?.r2 ?? { available: false, error: "no runner available" };
+                rabin2 = device?.rabin2 ?? local?.rabin2 ?? { available: false, error: "no runner available" };
+                notes.push("radare2 is not available on the iOS device or locally. Install via Sileo (Procursus 'radare2') on the device, or install r2 on this computer.");
+            }
+        }
+        return { enabled: true, mode, activeRunner, r2, rabin2, device, local, notes };
     }
     async r2BinaryInfo(remotePath) {
-        return this.withTempR2Binary(remotePath, async (binary) => ({
+        return this.withR2Binary(remotePath, async (binary, radare) => ({
             remotePath: binary.remotePath,
             size: binary.size,
-            ...(await this.radare.binaryInfo(binary.localPath))
+            ...(await radare.binaryInfo(binary.argvPath))
         }));
     }
     async r2AppTriage(bundleId) {
@@ -1039,67 +1120,188 @@ export class SftpFileService {
             throw new Error("CFBundleExecutable must be a file name, not a path.");
         }
         const remoteBinaryPath = this.assertCanonicalSafePath(joinRemote(bundle.path, executable));
-        return this.withTempR2Binary(remoteBinaryPath, (binary) => this.radare.appTriage({
+        return this.withR2Binary(remoteBinaryPath, (binary, radare) => radare.appTriage({
             bundleId: normalizedBundleId,
-            localPath: binary.localPath,
+            argvPath: binary.argvPath,
             remoteBinaryPath: binary.remotePath
         }));
     }
     async r2Strings(remotePath, query, limit) {
-        return this.withTempR2Binary(remotePath, async (binary) => ({
+        return this.withR2Binary(remotePath, async (binary, radare) => ({
             remotePath: binary.remotePath,
             size: binary.size,
-            ...(await this.radare.strings(binary.localPath, query, limit))
+            ...(await radare.strings(binary.argvPath, query, limit))
         }));
     }
     async r2Imports(remotePath, query, limit) {
-        return this.withTempR2Binary(remotePath, async (binary) => ({
+        return this.withR2Binary(remotePath, async (binary, radare) => ({
             remotePath: binary.remotePath,
             size: binary.size,
-            ...(await this.radare.imports(binary.localPath, query, limit))
+            ...(await radare.imports(binary.argvPath, query, limit))
         }));
     }
     async r2Functions(remotePath, limit) {
-        return this.withTempR2Binary(remotePath, async (binary) => ({
+        return this.withR2Binary(remotePath, async (binary, radare) => ({
             remotePath: binary.remotePath,
             size: binary.size,
-            ...(await this.radare.functions(binary.localPath, limit))
+            ...(await radare.functions(binary.argvPath, limit))
         }));
     }
     async r2FunctionDisasm(remotePath, functionNameOrAddress) {
-        return this.withTempR2Binary(remotePath, async (binary) => ({
+        return this.withR2Binary(remotePath, async (binary, radare) => ({
             remotePath: binary.remotePath,
             size: binary.size,
-            ...(await this.radare.functionDisasm(binary.localPath, functionNameOrAddress))
+            ...(await radare.functionDisasm(binary.argvPath, functionNameOrAddress))
         }));
     }
-    async withTempR2Binary(remotePath, handler) {
+    async withR2Binary(remotePath, handler) {
         this.assertR2Enabled();
-        const lexicalPath = assertSafePath(remotePath, this.config);
-        const client = await this.connectedClient();
-        const safeRemotePath = await this.resolveExistingSafePath(client, lexicalPath);
-        const stat = await client.stat(safeRemotePath);
-        const size = Number(stat.size ?? 0);
-        if (this.mapStatsType(stat) !== "file") {
-            throw new Error(`Remote path is not a regular file: ${safeRemotePath}`);
-        }
-        if (size > this.config.r2.maxBinarySize) {
-            throw new Error(`Binary is ${size} bytes, which exceeds r2.maxBinarySize=${this.config.r2.maxBinarySize}.`);
-        }
-        const tempDir = await mkdtemp(joinLocal(tmpdir(), "ios-files-mcp-r2-"));
-        const safeName = (basename(safeRemotePath) || "binary").replace(/[^A-Za-z0-9._-]/g, "_");
-        const localPath = joinLocal(tempDir, safeName);
+        const runner = await this.getR2Runner();
+        const radare = await this.getRadare();
+        const source = await runner.resolveBinary(remotePath);
         try {
-            await client.get(safeRemotePath, createWriteStream(localPath));
-            return await handler({
-                remotePath: safeRemotePath,
-                localPath,
-                size
-            });
+            return await handler({ remotePath: source.remotePath, argvPath: source.argvPath, size: source.size }, radare);
         }
         finally {
-            await rm(tempDir, { recursive: true, force: true });
+            await source.cleanup();
         }
+    }
+    async getR2Runner() {
+        if (!this.runnerPromise) {
+            this.runnerPromise = this.selectR2Runner().catch((error) => {
+                this.runnerPromise = undefined;
+                throw error;
+            });
+        }
+        return this.runnerPromise;
+    }
+    async getRadare() {
+        if (!this.radarePromise) {
+            this.radarePromise = this.getR2Runner().then((runner) => new RadareService(runner, {
+                timeoutMs: this.config.r2.timeoutMs,
+                maxOutputBytes: this.config.r2.maxOutputBytes
+            }));
+        }
+        return this.radarePromise;
+    }
+    buildLocalRunner() {
+        return new LocalR2Runner({
+            r2Path: this.config.r2.r2Path,
+            rabin2Path: this.config.r2.rabin2Path,
+            maxBinarySize: this.config.r2.maxBinarySize,
+            sftpResolver: this.sftpResolverFactory()
+        });
+    }
+    buildDeviceRunner() {
+        return new DeviceR2Runner({
+            r2Path: this.config.r2.deviceR2Path,
+            rabin2Path: this.config.r2.deviceRabin2Path,
+            probeTimeoutMs: 5_000,
+            maxBinarySize: this.config.r2.maxBinarySize,
+            sshClient: () => this.sshClient(),
+            sftpResolver: this.sftpResolverFactory()
+        });
+    }
+    async selectR2Runner() {
+        this.assertR2Enabled();
+        const mode = this.config.r2.mode;
+        if (mode === "local") {
+            const local = this.buildLocalRunner();
+            await local.probe();
+            this.activeRunnerMode = "local";
+            this.autoFallbackReason = undefined;
+            return local;
+        }
+        if (mode === "device") {
+            const device = this.buildDeviceRunner();
+            const probe = await device.probe();
+            if (!probe.r2.available || !probe.rabin2.available) {
+                const err = probe.r2.error ?? probe.rabin2.error ?? "r2/rabin2 not found on device";
+                throw new Error(`r2.mode=device but radare2 is not available on the iOS device: ${err}. Install via Sileo (Procursus 'radare2'), or set IOS_FILES_MCP_R2_MODE=auto to allow a local fallback.`);
+            }
+            this.activeRunnerMode = "device";
+            this.autoFallbackReason = undefined;
+            return device;
+        }
+        // auto
+        const device = this.buildDeviceRunner();
+        let deviceFailure;
+        try {
+            const probe = await device.probe();
+            if (probe.r2.available && probe.rabin2.available) {
+                this.activeRunnerMode = "device";
+                this.autoFallbackReason = undefined;
+                return device;
+            }
+            deviceFailure = probe.r2.error ?? probe.rabin2.error ?? "r2 not found on device";
+        }
+        catch (error) {
+            deviceFailure = error instanceof Error ? error.message : String(error);
+        }
+        this.autoFallbackReason = deviceFailure;
+        const local = this.buildLocalRunner();
+        await local.probe();
+        this.activeRunnerMode = "local";
+        return local;
+    }
+    async probeDeviceRunner() {
+        const runner = this.buildDeviceRunner();
+        try {
+            const probe = await runner.probe();
+            return {
+                r2Path: probe.r2Path,
+                rabin2Path: probe.rabin2Path,
+                r2: probe.r2,
+                rabin2: probe.rabin2
+            };
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            return {
+                r2Path: runner.r2Path,
+                rabin2Path: runner.rabin2Path,
+                r2: { available: false, error: message },
+                rabin2: { available: false, error: message }
+            };
+        }
+    }
+    async probeLocalRunner() {
+        const runner = this.buildLocalRunner();
+        const probe = await runner.probe();
+        return {
+            r2Path: probe.r2Path,
+            rabin2Path: probe.rabin2Path,
+            r2: probe.r2,
+            rabin2: probe.rabin2
+        };
+    }
+    sftpResolverFactory() {
+        return async (remotePath) => {
+            this.assertR2Enabled();
+            const lexicalPath = assertSafePath(remotePath, this.config);
+            const client = await this.connectedClient();
+            const safeRemotePath = await this.resolveExistingSafePath(client, lexicalPath);
+            const stat = await client.stat(safeRemotePath);
+            if (this.mapStatsType(stat) !== "file") {
+                throw new Error(`Remote path is not a regular file: ${safeRemotePath}`);
+            }
+            const size = Number(stat.size ?? 0);
+            return {
+                remotePath: safeRemotePath,
+                size,
+                download: async (localPath) => {
+                    await client.get(safeRemotePath, createWriteStream(localPath));
+                }
+            };
+        };
+    }
+    async sshClient() {
+        const sftp = await this.connectedClient();
+        const inner = sftp.client;
+        if (!inner) {
+            throw new Error("Underlying ssh2 client is not exposed by the SFTP wrapper. This usually indicates an unexpected ssh2-sftp-client version.");
+        }
+        return inner;
     }
     assertR2Enabled() {
         if (!this.config.r2.enabled) {
@@ -1118,10 +1320,15 @@ export class SftpFileService {
             allowedRoots: this.config.allowedRoots,
             localArtifactRoots: this.config.localArtifactRoots,
             logPath: this.config.logPath,
+            sftpOpTimeoutMs: this.config.sftpOpTimeoutMs,
             r2: {
                 enabled: this.config.r2.enabled,
+                mode: this.config.r2.mode,
+                activeRunner: this.activeRunnerMode,
                 r2Path: this.config.r2.r2Path,
                 rabin2Path: this.config.r2.rabin2Path,
+                deviceR2Path: this.config.r2.deviceR2Path,
+                deviceRabin2Path: this.config.r2.deviceRabin2Path,
                 timeoutMs: this.config.r2.timeoutMs,
                 maxOutputBytes: this.config.r2.maxOutputBytes,
                 maxBinarySize: this.config.r2.maxBinarySize
@@ -1150,11 +1357,15 @@ export class SftpFileService {
             "IOS_FILES_MCP_ALLOW_WRITES",
             "IOS_FILES_MCP_REQUIRE_WRITE_APPROVAL",
             "IOS_FILES_MCP_ENABLE_R2",
+            "IOS_FILES_MCP_R2_MODE",
             "IOS_FILES_MCP_R2_PATH",
             "IOS_FILES_MCP_RABIN2_PATH",
+            "IOS_FILES_MCP_R2_DEVICE_R2_PATH",
+            "IOS_FILES_MCP_R2_DEVICE_RABIN2_PATH",
             "IOS_FILES_MCP_R2_TIMEOUT_MS",
             "IOS_FILES_MCP_R2_MAX_OUTPUT_BYTES",
             "IOS_FILES_MCP_R2_MAX_BINARY_SIZE",
+            "IOS_FILES_MCP_SFTP_OP_TIMEOUT_MS",
             "IOS_FILES_MCP_CONFIG"
         ];
         return Object.fromEntries(envNames.map((name) => {
@@ -1345,7 +1556,7 @@ export class SftpFileService {
         if (this.connecting) {
             return this.connecting;
         }
-        this.connecting = this.connect();
+        this.connecting = this.connectWithRetry();
         try {
             this.client = await this.connecting;
             this.canonicalAllowedRoots = await this.resolveAllowedRoots(this.client);
@@ -1353,10 +1564,25 @@ export class SftpFileService {
         }
         catch (error) {
             this.client = undefined;
-            throw new SftpNotConnectedError(`SFTP is not connected: ${error instanceof Error ? error.message : String(error)}`);
+            const detail = error instanceof Error ? error.message : String(error);
+            throw new SftpNotConnectedError(`SFTP connection to ${this.config.host}:${this.config.port} failed: ${detail}. Check IOS_FILES_MCP_HOST, IOS_FILES_MCP_PASSWORD or IOS_FILES_MCP_KEY_PATH, and that OpenSSH is reachable on the iOS device.`);
         }
         finally {
             this.connecting = undefined;
+        }
+    }
+    async connectWithRetry() {
+        try {
+            return await this.connect();
+        }
+        catch (firstError) {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+            try {
+                return await this.connect();
+            }
+            catch {
+                throw firstError;
+            }
         }
     }
     async connect() {
@@ -1377,11 +1603,24 @@ export class SftpFileService {
         });
         return client;
     }
+    withSftpTimeout(op, label) {
+        const ms = this.config.sftpOpTimeoutMs;
+        let timer;
+        const timeout = new Promise((_resolve, reject) => {
+            timer = setTimeout(() => {
+                reject(new Error(`SFTP ${label} timed out after ${ms}ms. Tune IOS_FILES_MCP_SFTP_OP_TIMEOUT_MS if the device is slow.`));
+            }, ms);
+        });
+        return Promise.race([op, timeout]).finally(() => {
+            if (timer)
+                clearTimeout(timer);
+        });
+    }
     async resolveAllowedRoots(client) {
         const roots = new Set(this.config.allowedRoots);
         for (const root of this.config.allowedRoots) {
             try {
-                roots.add(normalizeRemotePath(await client.realPath(root)));
+                roots.add(normalizeRemotePath(await this.withSftpTimeout(client.realPath(root), `realPath ${root}`)));
             }
             catch {
                 roots.add(root);
@@ -1393,7 +1632,7 @@ export class SftpFileService {
         const lexicalPath = assertSafePath(input, this.config);
         let realPath;
         try {
-            realPath = normalizeRemotePath(await client.realPath(lexicalPath));
+            realPath = normalizeRemotePath(await this.withSftpTimeout(client.realPath(lexicalPath), `realPath ${lexicalPath}`));
         }
         catch (error) {
             throw new Error(`Path does not exist or permission was denied: ${lexicalPath}. ${error instanceof Error ? error.message : String(error)}`);
@@ -1600,15 +1839,17 @@ export class SftpFileService {
         };
     }
     async runHermesDecoder(input, commandTemplate, outputLimit) {
+        const tokens = this.parseCommandTemplate(commandTemplate);
         const tempDir = await mkdtemp(joinLocal(tmpdir(), "ios-files-mcp-hermes-"));
         const inputPath = joinLocal(tempDir, "bundle.hbc");
         const outputPath = joinLocal(tempDir, "decoder-output");
         try {
             await writeLocalFile(inputPath, input);
-            const command = commandTemplate
-                .replaceAll("{input}", this.shellQuote(inputPath))
-                .replaceAll("{output}", this.shellQuote(outputPath));
-            const result = await this.runCommand(command, outputLimit);
+            const { command, args } = this.substituteTokens(tokens, {
+                input: inputPath,
+                output: outputPath
+            });
+            const result = await this.runCommand(command, args, outputLimit);
             if (commandTemplate.includes("{output}") && existsSync(outputPath)) {
                 return {
                     stdout: await this.readDecoderOutputPath(outputPath, outputLimit),
@@ -1661,34 +1902,109 @@ export class SftpFileService {
         return parts.join("").trimStart();
     }
     async commandExists(commandName) {
-        const checkCommand = process.platform === "win32"
-            ? `where ${this.shellQuote(commandName)}`
-            : `command -v ${this.shellQuote(commandName)}`;
+        const isWin = process.platform === "win32";
+        const command = isWin ? "where" : "command";
+        const args = isWin ? [commandName] : ["-v", commandName];
         try {
-            await this.runCommand(checkCommand, 1024);
+            await this.runCommand(command, args, 1024);
             return true;
         }
         catch {
             return false;
         }
     }
-    runCommand(command, outputLimit) {
+    parseCommandTemplate(template) {
+        if (!template || !template.trim()) {
+            throw new Error("Command template is empty.");
+        }
+        const tokens = [];
+        let current = "";
+        let inSingle = false;
+        let inDouble = false;
+        let started = false;
+        const flushIfStarted = () => {
+            if (started) {
+                tokens.push(current);
+                current = "";
+                started = false;
+            }
+        };
+        for (let i = 0; i < template.length; i += 1) {
+            const ch = template[i];
+            if (!inSingle && !inDouble && /\s/.test(ch)) {
+                flushIfStarted();
+                continue;
+            }
+            if (!inDouble && ch === "'") {
+                started = true;
+                inSingle = !inSingle;
+                continue;
+            }
+            if (!inSingle && ch === "\"") {
+                started = true;
+                inDouble = !inDouble;
+                continue;
+            }
+            if (inDouble && ch === "\\" && i + 1 < template.length) {
+                const next = template[i + 1];
+                if (next === "\"" || next === "\\" || next === "$" || next === "`") {
+                    current += next;
+                    started = true;
+                    i += 1;
+                    continue;
+                }
+            }
+            if (!inSingle && !inDouble) {
+                if (ch === "$" && template[i + 1] === "(") {
+                    throw new Error(`Command template contains shell substitution \"$(\": ${template}`);
+                }
+                if (ch === "`") {
+                    throw new Error(`Command template contains backtick: ${template}`);
+                }
+                if (ch === ";" || ch === "|" || ch === "&" || ch === ">" || ch === "<") {
+                    throw new Error(`Command template contains shell metacharacter '${ch}': ${template}`);
+                }
+            }
+            current += ch;
+            started = true;
+        }
+        if (inSingle || inDouble) {
+            throw new Error(`Command template has an unterminated quote: ${template}`);
+        }
+        flushIfStarted();
+        if (tokens.length === 0) {
+            throw new Error("Command template is empty.");
+        }
+        return tokens;
+    }
+    substituteTokens(tokens, substitutions) {
+        const replaced = tokens.map((token) => {
+            let out = token;
+            for (const [key, value] of Object.entries(substitutions)) {
+                out = out.split(`{${key}}`).join(value);
+            }
+            return out;
+        });
+        const [command, ...args] = replaced;
+        return { command, args };
+    }
+    runCommand(command, args, outputLimit) {
         return new Promise((resolve, reject) => {
-            const child = spawn(command, {
-                shell: true,
+            const child = spawn(command, args, {
+                shell: false,
                 windowsHide: true
             });
             const stdout = [];
             const stderr = [];
             let stdoutBytes = 0;
             let stderrBytes = 0;
-            child.stdout.on("data", (chunk) => {
+            child.stdout?.on("data", (chunk) => {
                 if (stdoutBytes < outputLimit) {
                     stdout.push(chunk.subarray(0, Math.max(0, outputLimit - stdoutBytes)));
                 }
                 stdoutBytes += chunk.byteLength;
             });
-            child.stderr.on("data", (chunk) => {
+            child.stderr?.on("data", (chunk) => {
                 if (stderrBytes < outputLimit) {
                     stderr.push(chunk.subarray(0, Math.max(0, outputLimit - stderrBytes)));
                 }
@@ -1699,15 +2015,12 @@ export class SftpFileService {
                 const stdoutText = Buffer.concat(stdout).toString("utf8");
                 const stderrText = Buffer.concat(stderr).toString("utf8");
                 if (code !== 0) {
-                    reject(new Error(`Hermes decoder command failed with exit code ${code}: ${stderrText || stdoutText}`));
+                    reject(new Error(`Command failed (exit ${code}): ${stderrText || stdoutText}`));
                     return;
                 }
                 resolve({ stdout: stdoutText, stderr: stderrText });
             });
         });
-    }
-    shellQuote(value) {
-        return `"${value.replace(/"/g, "\\\"")}"`;
     }
     async readRemoteRange(client, path, start, end) {
         if (end < start) {

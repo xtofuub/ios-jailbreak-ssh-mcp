@@ -14,8 +14,11 @@ export type ServerConfig = {
   sqliteMaxReadSize: number;
   r2: {
     enabled: boolean;
+    mode: "auto" | "device" | "local";
     r2Path: string;
     rabin2Path: string;
+    deviceR2Path?: string;
+    deviceRabin2Path?: string;
     timeoutMs: number;
     maxOutputBytes: number;
     maxBinarySize: number;
@@ -32,6 +35,7 @@ export type ServerConfig = {
   writeApprovalTtlMs: number;
   connectTimeoutMs: number;
   readyTimeoutMs: number;
+  sftpOpTimeoutMs: number;
   logPath: string;
 };
 

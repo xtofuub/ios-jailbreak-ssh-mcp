@@ -1,6 +1,5 @@
-import { ProcessRunnerError } from "./processRunner.js";
-import type { ServerConfig } from "./types.js";
-type R2Config = ServerConfig["r2"];
+import type { R2Runner } from "./r2Runner.js";
+import { ProcessRunnerError } from "./r2Runner.js";
 export type R2InfoSummary = {
     arch?: string;
     bits?: number;
@@ -57,46 +56,65 @@ export type R2SuggestedAction = {
     reason: string;
     exampleArgs: Record<string, unknown>;
 };
-export type R2CheckResult = {
-    enabled: boolean;
-    r2Path: string;
-    rabin2Path: string;
-    r2: CommandCheck;
-    rabin2: CommandCheck;
-    notes: string[];
-};
-type CommandCheck = {
+export type R2RunnerCheck = {
     available: boolean;
     version?: string;
     error?: string;
 };
+export type R2CheckResult = {
+    enabled: boolean;
+    mode: "auto" | "device" | "local";
+    activeRunner: "device" | "local" | "none";
+    r2: R2RunnerCheck;
+    rabin2: R2RunnerCheck;
+    device?: {
+        r2Path: string;
+        rabin2Path: string;
+        r2: R2RunnerCheck;
+        rabin2: R2RunnerCheck;
+    };
+    local?: {
+        r2Path: string;
+        rabin2Path: string;
+        r2: R2RunnerCheck;
+        rabin2: R2RunnerCheck;
+    };
+    notes: string[];
+};
+export type RadareServiceOptions = {
+    timeoutMs: number;
+    maxOutputBytes: number;
+};
 export declare class RadareService {
-    private readonly config;
-    constructor(config: R2Config);
-    check(): Promise<R2CheckResult>;
-    binaryInfo(localPath: string): Promise<{
+    private readonly runner;
+    private readonly opts;
+    constructor(runner: R2Runner, opts: RadareServiceOptions);
+    get mode(): "device" | "local";
+    get r2Path(): string;
+    get rabin2Path(): string;
+    binaryInfo(argvPath: string): Promise<{
         info: R2InfoSummary;
         linkedLibraries: string[];
         notes: string[];
     }>;
-    imports(localPath: string, query?: string, limit?: number): Promise<{
+    imports(argvPath: string, query?: string, limit?: number): Promise<{
         query?: string;
         imports: R2Import[];
         returned: number;
         limit: number;
     }>;
-    strings(localPath: string, query?: string, limit?: number): Promise<{
+    strings(argvPath: string, query?: string, limit?: number): Promise<{
         query?: string;
         strings: R2String[];
         returned: number;
         limit: number;
     }>;
-    functions(localPath: string, limit?: number): Promise<{
+    functions(argvPath: string, limit?: number): Promise<{
         functions: R2Function[];
         returned: number;
         limit: number;
     }>;
-    functionDisasm(localPath: string, functionNameOrAddress: string): Promise<{
+    functionDisasm(argvPath: string, functionNameOrAddress: string): Promise<{
         functionNameOrAddress: string;
         resolvedAddress: string;
         name?: string;
@@ -106,7 +124,7 @@ export declare class RadareService {
     }>;
     appTriage(input: {
         bundleId: string;
-        localPath: string;
+        argvPath: string;
         remoteBinaryPath: string;
     }): Promise<{
         bundleId: string;
@@ -124,7 +142,7 @@ export declare class RadareService {
         notes: string[];
         suggestedNextActions: R2SuggestedAction[];
     }>;
-    private checkCommand;
+    private execOpts;
     private readInfo;
     private readLinkedLibraries;
     private readImports;
@@ -154,6 +172,5 @@ export declare class RadareService {
     private booleanValue;
     private asRecord;
     private arrayValue;
-    private assertEnabled;
 }
 export { ProcessRunnerError };

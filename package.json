@@ -7,8 +7,7 @@
     "ios-files-mcp": "./dist/index.js",
     "iosfiles-mcp": "./scripts/install-mcp.mjs",
     "ios-files-mcp-check-hermes-decoders": "./scripts/check-hermes-decoders.mjs",
-    "ios-files-mcp-install-hermes-dec": "./scripts/install-hermes-dec.mjs",
-    "ios-files-mcp-install-radare2": "./scripts/install-radare2.mjs"
+    "ios-files-mcp-install-hermes-dec": "./scripts/install-hermes-dec.mjs"
   },
   "files": [
     "dist",
@@ -22,10 +21,11 @@
     "check:hermes-decoders": "node scripts/check-hermes-decoders.mjs",
     "install:mcp": "node scripts/install-mcp.mjs",
     "install:hermes-dec": "node scripts/install-hermes-dec.mjs",
-    "install:radare2": "node scripts/install-radare2.mjs",
     "postinstall": "node scripts/postinstall.mjs",
     "prepublishOnly": "npm run build",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "start": "node dist/index.js"
   },
   "keywords": [
@@ -60,8 +60,10 @@
     "@types/archiver": "^7.0.0",
     "@types/js-beautify": "^1.14.3",
     "@types/node": "^24.10.1",
+    "@types/ssh2": "^1.15.0",
     "@types/ssh2-sftp-client": "^9.0.6",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.8"
   },
   "engines": {
     "node": ">=20"

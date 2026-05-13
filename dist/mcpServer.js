@@ -14,24 +14,24 @@ export function createMcpServer(service, logger, config) {
     registerTool(server, logger, "ios_mcp_config_status", "Inspect local MCP client config files and show whether ios-files is configured for Codex, Claude, OpenCode, and VS Code.", {}, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }, async () => service.mcpConfigStatus());
     registerTool(server, logger, "ios_app", "Short alias for ios_snapshot_app.", { bundleId: z.string() }, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }, (args) => service.snapshotApp(args.bundleId));
     registerTool(server, logger, "ios_snapshot_app", "Create a metadata-focused app snapshot by bundle id: bundle/data/app-group paths, Info.plist summary, preferences list, SQLite files, and JS bundles.", { bundleId: z.string() }, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }, (args) => service.snapshotApp(args.bundleId));
-    registerTool(server, logger, "ios_r2_check", "Check whether local radare2/rabin2 static analysis tools are enabled and available to this MCP process.", {}, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }, async () => service.r2Check());
-    registerTool(server, logger, "ios_r2_binary_info", "Copy one safe iOS Mach-O binary to a temporary local folder and return rabin2 binary metadata.", { remotePath: z.string() }, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }, (args) => service.r2BinaryInfo(args.remotePath));
-    registerTool(server, logger, "ios_r2_app_triage", "Fast static triage for an installed app by bundle id: binary info, linked libraries, interesting imports/strings, functions preview, and next steps.", { bundleId: z.string() }, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }, (args) => service.r2AppTriage(args.bundleId));
-    registerTool(server, logger, "ios_r2_strings", "Search strings in a safe iOS Mach-O binary using local rabin2. Use for URLs, endpoints, tokens, Firebase, debug text, and feature flags.", {
+    registerTool(server, logger, "ios_r2_check", "Report whether radare2 is enabled and which runner is active (device-side over SSH or local on this computer). Returns probed r2/rabin2 paths and versions for both modes.", {}, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }, async () => service.r2Check());
+    registerTool(server, logger, "ios_r2_binary_info", "Return Mach-O metadata (arch, bits, format, encryption, stripping) and linked libraries for one device binary. Runs radare2 on the iOS device when available (no copy); otherwise downloads the binary to a temp folder on this computer.", { remotePath: z.string() }, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }, (args) => service.r2BinaryInfo(args.remotePath));
+    registerTool(server, logger, "ios_r2_app_triage", "Resolve an installed app by bundle id and return binary info, linked libraries, interesting imports/strings, a functions preview, and suggested next actions. Runs r2 on the iOS device when installed there (recommended), otherwise locally after a temp copy.", { bundleId: z.string() }, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }, (args) => service.r2AppTriage(args.bundleId));
+    registerTool(server, logger, "ios_r2_strings", "Search strings in an iOS Mach-O binary using rabin2 (-zzj). Use for URLs, endpoints, tokens, Firebase config, debug text, feature flags. Runs on the device when available, otherwise locally.", {
         remotePath: z.string(),
         query: z.string().optional(),
         limit: z.number().int().positive().max(500).optional()
     }, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }, (args) => service.r2Strings(args.remotePath, args.query, args.limit));
-    registerTool(server, logger, "ios_r2_imports", "Search imports in a safe iOS Mach-O binary using local rabin2. Use for Keychain, crypto, networking, SQLite, WebKit, and anti-debug API checks.", {
+    registerTool(server, logger, "ios_r2_imports", "Search imports in an iOS Mach-O binary using rabin2 (-ij). Use for Keychain, crypto, networking, SQLite, WebKit, anti-debug API checks. Runs on the device when available, otherwise locally.", {
         remotePath: z.string(),
         query: z.string().optional(),
         limit: z.number().int().positive().max(500).optional()
     }, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }, (args) => service.r2Imports(args.remotePath, args.query, args.limit));
-    registerTool(server, logger, "ios_r2_functions", "List functions from a safe iOS Mach-O binary using local radare2. Use before choosing one function to disassemble.", {
+    registerTool(server, logger, "ios_r2_functions", "List functions from an iOS Mach-O binary using radare2 (aaa + aflj). Use before selecting one function to disassemble. Runs on the device when available, otherwise locally.", {
         remotePath: z.string(),
         limit: z.number().int().positive().max(500).optional()
     }, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }, (args) => service.r2Functions(args.remotePath, args.limit));
-    registerTool(server, logger, "ios_r2_function_disasm", "Disassemble one selected function or address from a safe iOS Mach-O binary using local radare2 JSON output.", {
+    registerTool(server, logger, "ios_r2_function_disasm", "Disassemble one selected function or address from an iOS Mach-O binary (pdfj JSON output). Runs on the device when available, otherwise locally.", {
         remotePath: z.string(),
         functionNameOrAddress: z.string()
     }, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }, (args) => service.r2FunctionDisasm(args.remotePath, args.functionNameOrAddress));

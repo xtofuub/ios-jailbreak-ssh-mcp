@@ -86,7 +86,7 @@ export function createMcpServer(
     server,
     logger,
     "ios_r2_check",
-    "Check whether local radare2/rabin2 static analysis tools are enabled and available to this MCP process.",
+    "Report whether radare2 is enabled and which runner is active (device-side over SSH or local on this computer). Returns probed r2/rabin2 paths and versions for both modes.",
     {},
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     async () => service.r2Check()
@@ -96,7 +96,7 @@ export function createMcpServer(
     server,
     logger,
     "ios_r2_binary_info",
-    "Copy one safe iOS Mach-O binary to a temporary local folder and return rabin2 binary metadata.",
+    "Return Mach-O metadata (arch, bits, format, encryption, stripping) and linked libraries for one device binary. Runs radare2 on the iOS device when available (no copy); otherwise downloads the binary to a temp folder on this computer.",
     { remotePath: z.string() },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     (args) => service.r2BinaryInfo(args.remotePath)
@@ -106,7 +106,7 @@ export function createMcpServer(
     server,
     logger,
     "ios_r2_app_triage",
-    "Fast static triage for an installed app by bundle id: binary info, linked libraries, interesting imports/strings, functions preview, and next steps.",
+    "Resolve an installed app by bundle id and return binary info, linked libraries, interesting imports/strings, a functions preview, and suggested next actions. Runs r2 on the iOS device when installed there (recommended), otherwise locally after a temp copy.",
     { bundleId: z.string() },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     (args) => service.r2AppTriage(args.bundleId)
@@ -116,7 +116,7 @@ export function createMcpServer(
     server,
     logger,
     "ios_r2_strings",
-    "Search strings in a safe iOS Mach-O binary using local rabin2. Use for URLs, endpoints, tokens, Firebase, debug text, and feature flags.",
+    "Search strings in an iOS Mach-O binary using rabin2 (-zzj). Use for URLs, endpoints, tokens, Firebase config, debug text, feature flags. Runs on the device when available, otherwise locally.",
     {
       remotePath: z.string(),
       query: z.string().optional(),
@@ -130,7 +130,7 @@ export function createMcpServer(
     server,
     logger,
     "ios_r2_imports",
-    "Search imports in a safe iOS Mach-O binary using local rabin2. Use for Keychain, crypto, networking, SQLite, WebKit, and anti-debug API checks.",
+    "Search imports in an iOS Mach-O binary using rabin2 (-ij). Use for Keychain, crypto, networking, SQLite, WebKit, anti-debug API checks. Runs on the device when available, otherwise locally.",
     {
       remotePath: z.string(),
       query: z.string().optional(),
@@ -144,7 +144,7 @@ export function createMcpServer(
     server,
     logger,
     "ios_r2_functions",
-    "List functions from a safe iOS Mach-O binary using local radare2. Use before choosing one function to disassemble.",
+    "List functions from an iOS Mach-O binary using radare2 (aaa + aflj). Use before selecting one function to disassemble. Runs on the device when available, otherwise locally.",
     {
       remotePath: z.string(),
       limit: z.number().int().positive().max(500).optional()
@@ -157,7 +157,7 @@ export function createMcpServer(
     server,
     logger,
     "ios_r2_function_disasm",
-    "Disassemble one selected function or address from a safe iOS Mach-O binary using local radare2 JSON output.",
+    "Disassemble one selected function or address from an iOS Mach-O binary (pdfj JSON output). Runs on the device when available, otherwise locally.",
     {
       remotePath: z.string(),
       functionNameOrAddress: z.string()

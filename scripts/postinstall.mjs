@@ -16,12 +16,6 @@ const args = [installer, "--client", clients];
 if (isTruthy(process.env.IOS_FILES_MCP_INSTALL_HERMES)) {
   args.push("--install-hermes");
 }
-if (isTruthy(process.env.IOS_FILES_MCP_INSTALL_R2)) {
-  args.push("--install-r2");
-}
-if (process.env.IOS_FILES_MCP_R2_PACKAGE_MANAGER) {
-  args.push("--r2-package-manager", process.env.IOS_FILES_MCP_R2_PACKAGE_MANAGER);
-}
 
 const result = spawnSync(process.execPath, args, {
   stdio: "inherit",

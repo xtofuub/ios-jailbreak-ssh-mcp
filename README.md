@@ -74,21 +74,15 @@ all        -> all supported clients
 
 The installer writes an `ios-files` MCP server entry and backs up existing config files to `.bak`.
 
-Install MCP config plus local radare2:
+Install with optional Hermes bytecode decoders:
 
 ```powershell
-npx -p github:xtofuub/ios-files-mcp iosfiles-mcp --client codex --host 192.168.1.23 --password change-me --install-r2
-```
-
-`--install-r2` uses a local package manager when available: `winget`, `choco`, or `scoop` on Windows; `brew` on macOS; `apt`, `dnf`, `yum`, `pacman`, `zypper`, `apk`, or `brew` on Linux. It may prompt for admin/sudo approval. Choose one explicitly with `--r2-package-manager winget`.
-
-Full setup, including radare2 and optional Hermes bytecode decoders:
-
-```powershell
-npx -p github:xtofuub/ios-files-mcp iosfiles-mcp --client codex --host 192.168.1.23 --password change-me --install-r2 --install-hermes
+npx -p github:xtofuub/ios-files-mcp iosfiles-mcp --client codex --host 192.168.1.23 --password change-me --install-hermes
 ```
 
 Hermes decoders are only needed for React Native Hermes bytecode bundle decoding. The flag installs `hermes-dec` with Python/pipx when available.
+
+For radare2 static analysis, see the [radare2 section](#radare2-static-analysis-tools) below — recommended path is to install `radare2` on the iOS device itself via Sileo.
 
 ## USB SSH
 
@@ -135,11 +129,9 @@ $env:IOS_FILES_MCP_PASSWORD="change-me"
 npm install github:xtofuub/ios-files-mcp
 ```
 
-Add these env vars if you also want radare2 or Hermes decoders:
+Add this env var if you also want Hermes decoders:
 
 ```powershell
-$env:IOS_FILES_MCP_INSTALL_R2="true"
-$env:IOS_FILES_MCP_R2_PACKAGE_MANAGER="winget"
 $env:IOS_FILES_MCP_INSTALL_HERMES="true"
 ```
 
@@ -156,11 +148,15 @@ IOS_FILES_MCP_READ_ONLY
 IOS_FILES_MCP_ALLOW_WRITES
 IOS_FILES_MCP_REQUIRE_WRITE_APPROVAL
 IOS_FILES_MCP_ENABLE_R2
+IOS_FILES_MCP_R2_MODE
+IOS_FILES_MCP_R2_DEVICE_R2_PATH
+IOS_FILES_MCP_R2_DEVICE_RABIN2_PATH
 IOS_FILES_MCP_R2_PATH
 IOS_FILES_MCP_RABIN2_PATH
 IOS_FILES_MCP_R2_TIMEOUT_MS
 IOS_FILES_MCP_R2_MAX_OUTPUT_BYTES
 IOS_FILES_MCP_R2_MAX_BINARY_SIZE
+IOS_FILES_MCP_SFTP_OP_TIMEOUT_MS
 IOS_FILES_MCP_CONFIG
 ```
 
@@ -430,30 +426,44 @@ npx -p github:xtofuub/ios-files-mcp ios-files-mcp-check-hermes-decoders
 
 ### radare2 static analysis tools
 
-These tools run `radare2` and `rabin2` locally on your computer, not on the iOS device. The MCP copies the selected Mach-O binary from the device into a temporary local folder, analyzes it, then deletes the temporary copy.
+By default these tools detect `radare2` on the iOS device and run it there over SSH — no binary copy needed. If `r2` is not installed on the device, the MCP falls back to running `r2`/`rabin2` on your computer after copying the binary to a temporary local folder. Run `ios_r2_check` to see which runner is active.
 
-Requirements:
+Recommended install (on the iOS device, via Sileo):
 
-- Install radare2 locally so `r2` and `rabin2` are on PATH.
-- The tools are enabled by default. Set `IOS_FILES_MCP_ENABLE_R2=false` only if you want to disable them.
-- Static analysis only. Frida/runtime instrumentation is intentionally not included in this module.
+1. Open Sileo on the jailbroken device.
+2. Install the `radare2` package from the Procursus repo (default on modern jailbreaks like Dopamine and palera1n).
+3. From your computer, run `ssh mobile@<device-ip> 'r2 -v'` to confirm.
 
-Standalone radare2 installer:
+Common device paths after Sileo install:
 
-```powershell
-npx -p github:xtofuub/ios-files-mcp ios-files-mcp-install-radare2
+```text
+/usr/bin/r2          (rootful jailbreaks: unc0ver, checkra1n, classic palera1n)
+/var/jb/usr/bin/r2   (rootless jailbreaks: Dopamine, palera1n rootless)
 ```
+
+The MCP probes `command -v r2` over SSH, so it picks up whatever is on the device's `$PATH`. Override with `IOS_FILES_MCP_R2_DEVICE_R2_PATH=/your/path` if the binary is in a non-standard location.
+
+Modes:
+
+- `IOS_FILES_MCP_R2_MODE=auto` (default) — try device first, fall back to local.
+- `IOS_FILES_MCP_R2_MODE=device` — require device-side r2; fail fast if missing.
+- `IOS_FILES_MCP_R2_MODE=local` — always run on this computer (copies binary to a temp folder).
 
 Optional env:
 
 ```text
 IOS_FILES_MCP_ENABLE_R2=true
+IOS_FILES_MCP_R2_MODE=auto
+IOS_FILES_MCP_R2_DEVICE_R2_PATH=/var/jb/usr/bin/r2
+IOS_FILES_MCP_R2_DEVICE_RABIN2_PATH=/var/jb/usr/bin/rabin2
 IOS_FILES_MCP_R2_PATH=r2
 IOS_FILES_MCP_RABIN2_PATH=rabin2
 IOS_FILES_MCP_R2_TIMEOUT_MS=30000
 IOS_FILES_MCP_R2_MAX_OUTPUT_BYTES=16777216
 IOS_FILES_MCP_R2_MAX_BINARY_SIZE=134217728
 ```
+
+Migration note: the previous host-side installer (`ios-files-mcp-install-radare2`) and the `IOS_FILES_MCP_INSTALL_R2` postinstall flag have been removed. Install radare2 on the iOS device via Sileo, or install locally with your own package manager if you prefer `IOS_FILES_MCP_R2_MODE=local`.
 
 When to use:
 
